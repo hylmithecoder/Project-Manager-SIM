@@ -1091,7 +1091,17 @@ export async function handleWsAction(
             ? "localhost"
             : process.env.APP_SERVER_HOST || "localhost";
         const port = process.env.APP_SERVER_PORT || "5790";
-        const joinUrl = `http://${host}:${port}/?join_email=${encodeURIComponent(email)}`;
+        const envWs = process.env.NEXT_PUBLIC_WS_URL;
+        let baseUrl = `http://${host}:${port}`;
+        if (process.env.APP_PUBLIC_URL) {
+          baseUrl = process.env.APP_PUBLIC_URL.replace(/\/+$/, "");
+        } else if (envWs) {
+          baseUrl = envWs
+            .replace(/^wss:\/\//i, "https://")
+            .replace(/^ws:\/\//i, "http://")
+            .replace(/\/ws\/?$/i, "");
+        }
+        const joinUrl = `${baseUrl}/?join_email=${encodeURIComponent(email)}`;
 
         const sendRes = await sendWorkspaceInvitationEmail({
           toEmail: email,

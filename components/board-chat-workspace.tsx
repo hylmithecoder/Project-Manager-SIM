@@ -32,16 +32,26 @@ function generateUuid(): string {
 
 function resolveWsUrl(): string {
   if (typeof window !== "undefined") {
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    if (window.location.port && window.location.port !== "3000") {
-      return `${proto}//${window.location.host}/ws`;
+    // 1. Check if user provided an override via query parameter (e.g. ?ws=wss://...)
+    const params = new URLSearchParams(window.location.search);
+    const queryWs = params.get("ws");
+    if (queryWs) return queryWs;
+
+    // 2. Always match protocol: wss: for https:, ws: for http:
+    const isHttps = window.location.protocol === "https:";
+    const proto = isHttps ? "wss:" : "ws:";
+
+    // 3. Next.js dev server running on port 3000 targets Bun server on port 5790
+    if (window.location.port === "3000") {
+      return `${proto}//${window.location.hostname}:5790/ws`;
     }
-    return (
-      process.env.NEXT_PUBLIC_WS_URL ||
-      `${proto}//${window.location.hostname}:5790/ws`
-    );
+
+    // 4. Automatically follow the exact browser origin (hostname + port or domain)
+    // E.g. https://projectmanager.edge.autosmartparking.com -> wss://projectmanager.edge.autosmartparking.com/ws
+    // E.g. http://localhost:5790 -> ws://localhost:5790/ws
+    return `${proto}//${window.location.host}/ws`;
   }
-  return process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:5790/ws";
+  return "ws://localhost:5790/ws";
 }
 
 export function BoardChatWorkspace() {
@@ -100,7 +110,7 @@ export function BoardChatWorkspace() {
     (action: WsAction, payload: Record<string, unknown> = {}) => {
       const ws = wsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
-        setStatusMessage("WebSocket belum terhubung ke server Bun (port 5790).");
+        setStatusMessage("WebSocket belum terhubung ke server.");
         return;
       }
 

@@ -128,7 +128,7 @@ export function Navbar({
             }`}
           />
           <span className="text-muted">
-            {wsConnected ? "Live :5790" : "Offline"}
+            {wsConnected ? "Live" : "Offline"}
           </span>
         </div>
 

@@ -83,7 +83,7 @@ export function LoginPage({
                   }`}
                 />
                 {wsConnected
-                  ? "WebSocket Live (Port 5790)"
+                  ? "WebSocket Live"
                   : "Menghubungkan Server..."}
               </div>
 
