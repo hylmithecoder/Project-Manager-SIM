@@ -46,6 +46,6 @@
   --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --radius-btn: 16px;
   --radius-card: 20px;
-  --shadow-soft: 0 6px 16px rgb(27 36 64 / 0.10);
-  --shadow-glow: 0 8px 20px color-mix(in srgb, var(--primary-strong) 30%, transparent);
+  --shadow-soft: 0 2px 8px rgb(27 36 64 / 0.06);
+  --shadow-glow: none;
 }

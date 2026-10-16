@@ -42,10 +42,16 @@ Implemented dedicated role-based dashboards for **Admin** (`components/admin-das
   - Interactive checklists: Toggle checklist items directly from the personal dashboard (`checklist:toggle_item`).
   - Due date tracking: Overdue and upcoming badge highlights.
   - Chat room access: View rooms and permissions. Displays a lock badge and disabled chat input when `only_admins_can_send` is active for non-admins.
-- **Unified Workspace Navigation ([components/board-chat-workspace.tsx](file:///home/hylmi/Hylmi/project/projectmanager/components/board-chat-workspace.tsx))**:
-  - 3-tab switcher: `Papan Kanban & Chat Utama`, `Dashboard Admin`, and `Dashboard Saya`.
-  - Blue theme (`default`) enforced throughout layout and components.
-  - Join URL query parameter listener auto-selects user profile upon opening invitation link.
+- **Dedicated Login Page ([components/auth/login-page.tsx](file:///home/hylmi/Hylmi/project/projectmanager/components/auth/login-page.tsx))**:
+  - Full-screen Clean Isometric UI login page with blue theme (`default`), branding, and isometric SVG illustration.
+  - Quick-select account picker (Owner, Admin, Member) for zero-friction sign-in and testing.
+  - Email login form supporting workspace invitation and auto-join.
+- **Modular App Layout ([components/layout/app-layout.tsx](file:///home/hylmi/Hylmi/project/projectmanager/components/layout/app-layout.tsx))**:
+  - Replaces monolithic stacked card with modern enterprise application structure.
+  - **Top Navbar ([components/layout/navbar.tsx](file:///home/hylmi/Hylmi/project/projectmanager/components/layout/navbar.tsx))**: Workspace identity, breadcrumb, live WebSocket status pill, user avatar, role badge, and "Keluar" (Logout) button.
+  - **Left Sidebar ([components/layout/sidebar.tsx](file:///home/hylmi/Hylmi/project/projectmanager/components/layout/sidebar.tsx))**: Navigation menu (`kanban`, `chat`, `user`, `admin`), active rooms list with lock indicators, active boards list, and team members stat counter.
+  - **Modular Views**: Decomposed Kanban view ([components/kanban/kanban-board-view.tsx](file:///home/hylmi/Hylmi/project/projectmanager/components/kanban/kanban-board-view.tsx)) and Chat view ([components/chat/chat-room-view.tsx](file:///home/hylmi/Hylmi/project/projectmanager/components/chat/chat-room-view.tsx)).
+  - **Zero Glowing Shadows**: Removed all neon/glow shadow effects (`--shadow-glow: none`, removed `shadow-glow` classes) across all buttons, keeping styling crisp, solid, and professional.
 
 ## 5. Verification & Tests
 - **Integration Tests ([server/__tests__/backend.test.ts](file:///home/hylmi/Hylmi/project/projectmanager/server/__tests__/backend.test.ts))**:
@@ -55,8 +61,9 @@ Implemented dedicated role-based dashboards for **Admin** (`components/admin-das
   - Verified `smtp:status` reports active credentials.
   - All 3 test suites passed (51 `expect()` assertions).
 - **Static Analysis & Compilation**:
-  - `eslint` passed with 0 errors.
+  - `eslint` passed with 0 errors and 0 warnings.
   - `STATIC_EXPORT=true next build` generated static export into `out/`.
   - `server/scripts/embed-static.ts` embedded all 33 assets into `server/embedded-assets.ts`.
   - `bun build --compile --minify --bytecode server/index.ts --outfile build/projectmanager` produced self-contained 82MB binary.
-  - Executed `./build/projectmanager` on test port `5797`: verified `/health` and `/` respond with HTTP 200 and static HTML directly from memory.
+  - Executed `./build/projectmanager` on test port: verified `/health` and `/` respond with HTTP 200 and static HTML directly from memory.
+
