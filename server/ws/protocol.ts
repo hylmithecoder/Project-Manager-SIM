@@ -19,7 +19,12 @@ export type WsAction =
   | "message:update"
   | "message:delete"
   | "message:react"
-  | "message:mark_read";
+  | "message:mark_read"
+  | "workspace:invite_member"
+  | "admin:update_member_role"
+  | "admin:toggle_room_permission"
+  | "smtp:status"
+  | "smtp:test_send";
 
 export interface WsRequestMessage<T = Record<string, unknown>> {
   id: string;
@@ -58,6 +63,25 @@ export interface WorkspaceDto {
   name: string;
   slug: string;
   owner_id: string;
+}
+
+export interface WorkspaceMemberDto {
+  workspace_id: string;
+  user_id: string;
+  role: "owner" | "admin" | "member" | "guest";
+  joined_at: string;
+  user_name: string;
+  user_email: string;
+  avatar_url: string | null;
+}
+
+export interface SmtpStatusDto {
+  ok: boolean;
+  message: string;
+  host: string;
+  port: number;
+  user: string;
+  enabled: boolean;
 }
 
 export interface BoardDto {
@@ -170,6 +194,7 @@ export interface NotificationDto {
 export interface WorkspaceSnapshot {
   users: UserDto[];
   workspaces: WorkspaceDto[];
+  workspace_members: WorkspaceMemberDto[];
   boards: BoardDto[];
   lists: ListDto[];
   labels: LabelDto[];
@@ -178,4 +203,5 @@ export interface WorkspaceSnapshot {
   messages: MessageDto[];
   activities: ActivityDto[];
   notifications: NotificationDto[];
+  smtp_status?: SmtpStatusDto;
 }

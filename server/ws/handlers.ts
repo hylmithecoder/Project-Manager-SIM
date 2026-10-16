@@ -1,5 +1,11 @@
 import type { BunSqlClient } from "../bun-env";
 import { SEED_IDS } from "../database/seeder";
+import {
+  getSmtpConfig,
+  sendEmail,
+  sendWorkspaceInvitationEmail,
+  verifySmtpConnection,
+} from "../services/smtp";
 import type {
   ActivityDto,
   BoardDto,
@@ -11,8 +17,10 @@ import type {
   MessageReactionDto,
   NotificationDto,
   RoomDto,
+  SmtpStatusDto,
   UserDto,
   WorkspaceDto,
+  WorkspaceMemberDto,
   WorkspaceSnapshot,
   WsAction,
 } from "./protocol";
@@ -196,9 +204,43 @@ export async function fetchWorkspaceSnapshot(
     LIMIT 30
   `;
 
+  const workspace_members = await sql<WorkspaceMemberDto>`
+    SELECT
+      wm.workspace_id,
+      wm.user_id,
+      wm.role,
+      wm.joined_at::text AS joined_at,
+      u.name AS user_name,
+      u.email AS user_email,
+      u.avatar_url
+    FROM workspace_members wm
+    INNER JOIN users u ON u.id = wm.user_id
+    ORDER BY
+      CASE wm.role
+        WHEN 'owner' THEN 1
+        WHEN 'admin' THEN 2
+        WHEN 'member' THEN 3
+        ELSE 4
+      END ASC,
+      wm.joined_at ASC
+  `;
+
+  const smtpConfig = getSmtpConfig();
+  const smtp_status: SmtpStatusDto = {
+    ok: smtpConfig.enabled,
+    message: smtpConfig.enabled
+      ? `Layanan SMTP Aktif (${smtpConfig.host}:${smtpConfig.port})`
+      : "Layanan SMTP dinonaktifkan di .env",
+    host: smtpConfig.host,
+    port: smtpConfig.port,
+    user: smtpConfig.user,
+    enabled: smtpConfig.enabled,
+  };
+
   return {
     users,
     workspaces,
+    workspace_members,
     boards,
     lists,
     labels,
@@ -207,6 +249,7 @@ export async function fetchWorkspaceSnapshot(
     messages,
     activities,
     notifications,
+    smtp_status,
   };
 }
 
@@ -942,6 +985,204 @@ export async function handleWsAction(
         mutated: true,
         result: { room_id: roomId, message_id: messageId },
       };
+    }
+
+    case "workspace:invite_member": {
+      const email = String(payload.email || "").trim().toLowerCase();
+      const rawName = String(payload.name || "").trim();
+      const name = rawName || email.split("@")[0] || "User Baru";
+      const workspaceId = String(payload.workspace_id || SEED_IDS.workspace);
+      const targetRole =
+        payload.role === "admin"
+          ? "admin"
+          : payload.role === "guest"
+            ? "guest"
+            : "member";
+
+      if (!email || !email.includes("@")) {
+        throw new Error("Alamat email Gmail/email valid diperlukan");
+      }
+
+      const inviteResult = await sql.begin(async (tx) => {
+        const [existingUser] = await tx<{ id: string; name: string; email: string }>`
+          SELECT id, name, email FROM users WHERE LOWER(email) = ${email}
+        `;
+
+        let isNewUser = false;
+        let finalUser = existingUser;
+
+        if (!finalUser) {
+          isNewUser = true;
+          const defaultPassHash = await Bun.password.hash("password123");
+          [finalUser] = await tx<{ id: string; name: string; email: string }>`
+            INSERT INTO users (name, email, password_hash, last_seen_at)
+            VALUES (${name}, ${email}, ${defaultPassHash}, now())
+            RETURNING id, name, email
+          `;
+        }
+
+        await tx`
+          INSERT INTO workspace_members (workspace_id, user_id, role)
+          VALUES (${workspaceId}, ${finalUser.id}, ${targetRole})
+          ON CONFLICT (workspace_id, user_id) DO UPDATE SET role = EXCLUDED.role
+        `;
+
+        const targetRooms = await tx<{ id: string }>`
+          SELECT id FROM rooms WHERE workspace_id = ${workspaceId} AND type IN ('group', 'board')
+        `;
+        for (const r of targetRooms) {
+          await tx`
+            INSERT INTO room_members (room_id, user_id, role)
+            VALUES (${r.id}, ${finalUser.id}, 'member')
+            ON CONFLICT DO NOTHING
+          `;
+        }
+
+        const [actorInfo] = await tx<{ name: string }>`
+          SELECT name FROM users WHERE id = ${defaultActorId}
+        `;
+        const [wsInfo] = await tx<{ name: string }>`
+          SELECT name FROM workspaces WHERE id = ${workspaceId}
+        `;
+
+        await tx`
+          INSERT INTO activities (board_id, actor_id, action, payload)
+          VALUES (
+            ${SEED_IDS.board},
+            ${defaultActorId},
+            'member_invited',
+            ${JSON.stringify({
+              email,
+              user_id: finalUser.id,
+              role: targetRole,
+              is_new_user: isNewUser,
+            })}::jsonb
+          )
+        `;
+
+        const boardRooms = await tx<{ id: string }>`
+          SELECT id FROM rooms WHERE board_id = ${SEED_IDS.board} LIMIT 1
+        `;
+        if (boardRooms.length > 0) {
+          await tx`
+            INSERT INTO messages (room_id, sender_id, type, content)
+            VALUES (
+              ${boardRooms[0].id},
+              ${defaultActorId},
+              'task_event',
+              ${`${actorInfo?.name || "Admin"} mengundang ${finalUser.name} (${email}) sebagai ${targetRole}`}
+            )
+          `;
+        }
+
+        return {
+          user: finalUser,
+          isNewUser,
+          actorName: actorInfo?.name || "Admin",
+          workspaceName: wsInfo?.name || "Auto Smart Workspace",
+        };
+      });
+
+      let emailSent = false;
+      let emailError: string | undefined;
+      try {
+        const host =
+          process.env.APP_SERVER_HOST === "0.0.0.0"
+            ? "localhost"
+            : process.env.APP_SERVER_HOST || "localhost";
+        const port = process.env.APP_SERVER_PORT || "5790";
+        const joinUrl = `http://${host}:${port}/?join_email=${encodeURIComponent(email)}`;
+
+        const sendRes = await sendWorkspaceInvitationEmail({
+          toEmail: email,
+          toName: inviteResult.user.name,
+          inviterName: inviteResult.actorName,
+          workspaceName: inviteResult.workspaceName,
+          joinUrl,
+        });
+        emailSent = sendRes.ok;
+        if (!sendRes.ok) emailError = sendRes.error;
+      } catch (err) {
+        emailError = err instanceof Error ? err.message : String(err);
+      }
+
+      return {
+        mutated: true,
+        result: {
+          user_id: inviteResult.user.id,
+          email: inviteResult.user.email,
+          name: inviteResult.user.name,
+          role: targetRole,
+          is_new_user: inviteResult.isNewUser,
+          email_sent: emailSent,
+          email_error: emailError,
+        },
+      };
+    }
+
+    case "admin:update_member_role": {
+      const workspaceId = String(payload.workspace_id || SEED_IDS.workspace);
+      const userId = String(payload.user_id || "");
+      const role = String(payload.role || "member") as
+        | "owner"
+        | "admin"
+        | "member"
+        | "guest";
+      if (!userId) throw new Error("user_id is required");
+
+      await sql`
+        UPDATE workspace_members
+        SET role = ${role}
+        WHERE workspace_id = ${workspaceId} AND user_id = ${userId}
+      `;
+
+      return {
+        mutated: true,
+        result: { workspace_id: workspaceId, user_id: userId, role },
+      };
+    }
+
+    case "admin:toggle_room_permission": {
+      const roomId = String(payload.room_id || "");
+      const onlyAdmins = Boolean(payload.only_admins_can_send);
+      if (!roomId) throw new Error("room_id is required");
+
+      await sql`
+        UPDATE rooms
+        SET only_admins_can_send = ${onlyAdmins}
+        WHERE id = ${roomId}
+      `;
+
+      return {
+        mutated: true,
+        result: { room_id: roomId, only_admins_can_send: onlyAdmins },
+      };
+    }
+
+    case "smtp:status": {
+      const status = await verifySmtpConnection();
+      return { mutated: false, result: status };
+    }
+
+    case "smtp:test_send": {
+      const to = String(payload.to || "").trim();
+      if (!to || !to.includes("@")) {
+        throw new Error("Alamat email tujuan tidak valid");
+      }
+
+      const sendRes = await sendEmail({
+        to,
+        subject: "Tes Pengiriman Email — Sistem Task Board & Chat Terintegrasi",
+        html: `
+          <div style="font-family: sans-serif; padding: 20px; color: #1b2440;">
+            <h2 style="color: #3b63d6;">Tes Pengiriman Berhasil!</h2>
+            <p>Halo, ini adalah email konfirmasi dari integrasi SMTP Auto Smart Parking.</p>
+            <p>Waktu pengiriman: <strong>${new Date().toLocaleString("id-ID")}</strong></p>
+          </div>
+        `,
+      });
+
+      return { mutated: false, result: sendRes };
     }
 
     default:

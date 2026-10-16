@@ -117,7 +117,7 @@ describe("PostgreSQL ERD Schema, Seeder & Bun WebSocket CRUD Server", () => {
       new Promise((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error(`Timeout waiting for ${req.action}`)),
-          5000,
+          15000,
         );
         const listener = (evt: MessageEvent) => {
           const parsed = JSON.parse(String(evt.data)) as
@@ -220,9 +220,84 @@ describe("PostgreSQL ERD Schema, Seeder & Bun WebSocket CRUD Server", () => {
         )
     `;
 
+    // 4. Invite a new user via email (creates user as regular member if non-existent)
+    const testInviteEmail = `invitee_${Date.now()}@gmail.com`;
+    const inviteRes = await sendRequest<{
+      user_id: string;
+      email: string;
+      name: string;
+      role: string;
+      is_new_user: boolean;
+    }>({
+      id: "req-invite-member",
+      action: "workspace:invite_member",
+      payload: {
+        workspace_id: SEED_IDS.workspace,
+        email: testInviteEmail,
+        name: "Anggota Baru Dari Gmail",
+        role: "member",
+      },
+    });
+    expect(inviteRes.ok).toBe(true);
+    expect(inviteRes.data?.is_new_user).toBe(true);
+    expect(inviteRes.data?.role).toBe("member");
+
+    // Verify user exists in database and in workspace_members
+    const [invitedDbUser] = await sql<{ id: string; email: string }>`
+      SELECT id, email FROM users WHERE LOWER(email) = ${testInviteEmail}
+    `;
+    expect(invitedDbUser).toBeDefined();
+    expect(invitedDbUser.email).toBe(testInviteEmail);
+
+    const [memberDbRow] = await sql<{ role: string }>`
+      SELECT role FROM workspace_members
+      WHERE workspace_id = ${SEED_IDS.workspace} AND user_id = ${invitedDbUser.id}
+    `;
+    expect(memberDbRow.role).toBe("member");
+
+    // 5. Admin updates member role
+    const updateRoleRes = await sendRequest<{ role: string }>({
+      id: "req-update-role",
+      action: "admin:update_member_role",
+      payload: {
+        workspace_id: SEED_IDS.workspace,
+        user_id: invitedDbUser.id,
+        role: "admin",
+      },
+    });
+    expect(updateRoleRes.ok).toBe(true);
+    expect(updateRoleRes.data?.role).toBe("admin");
+
+    // 6. Admin toggles room permission only_admins_can_send
+    const togglePermRes = await sendRequest<{ only_admins_can_send: boolean }>({
+      id: "req-toggle-perm",
+      action: "admin:toggle_room_permission",
+      payload: {
+        room_id: SEED_IDS.rooms.boardRoom,
+        only_admins_can_send: true,
+      },
+    });
+    expect(togglePermRes.ok).toBe(true);
+    expect(togglePermRes.data?.only_admins_can_send).toBe(true);
+
+    // Reset room permission back to false
+    await sendRequest({
+      id: "req-reset-perm",
+      action: "admin:toggle_room_permission",
+      payload: {
+        room_id: SEED_IDS.rooms.boardRoom,
+        only_admins_can_send: false,
+      },
+    });
+
+    // Cleanup invited user
+    await sql`DELETE FROM workspace_members WHERE user_id = ${invitedDbUser.id}`;
+    await sql`DELETE FROM room_members WHERE user_id = ${invitedDbUser.id}`;
+    await sql`DELETE FROM users WHERE id = ${invitedDbUser.id}`;
+
     await new Promise<void>((resolve) => {
       ws.onclose = () => resolve();
       ws.close();
     });
-  });
+  }, 25000);
 });
