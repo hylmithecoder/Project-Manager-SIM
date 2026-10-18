@@ -1,332 +1,149 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { AdminDashboard } from "@/components/admin-dashboard";
+import { InviteAcceptPage } from "@/components/auth/invite-accept-page";
 import { LoginPage } from "@/components/auth/login-page";
+import { ResetPasswordPage } from "@/components/auth/reset-password-page";
 import { ChatRoomView } from "@/components/chat/chat-room-view";
+import { DeveloperConsole } from "@/components/developer/developer-console";
 import { KanbanBoardView } from "@/components/kanban/kanban-board-view";
 import { AppLayout } from "@/components/layout/app-layout";
-import type { SidebarTab } from "@/components/layout/sidebar";
+import { SettingsView } from "@/components/settings/settings-view";
+import { WorkspaceProvider, outlineBtn, type NavState } from "@/components/ui/kit";
 import { UserDashboard } from "@/components/user-dashboard";
-import type {
-  UserDto,
-  WorkspaceSnapshot,
-  WsAction,
-  WsBroadcastEvent,
-  WsResponseMessage,
-} from "@/server/ws/protocol";
+import { useWorkspaceSocket } from "@/lib/use-workspace-socket";
 
-function generateUuid(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
-    return crypto.randomUUID();
-  }
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
+const TABS: NavState["tab"][] = ["kanban", "chat", "user", "admin", "settings"];
+const noopSubscribe = () => () => {};
 
-function resolveWsUrl(): string {
-  if (typeof window !== "undefined") {
-    // 1. Check if user provided an override via query parameter (e.g. ?ws=wss://...)
-    const params = new URLSearchParams(window.location.search);
-    const queryWs = params.get("ws");
-    if (queryWs) return queryWs;
-
-    // 2. Always match protocol: wss: for https:, ws: for http:
-    const isHttps = window.location.protocol === "https:";
-    const proto = isHttps ? "wss:" : "ws:";
-
-    // 3. Next.js dev server running on port 3000 targets Bun server on port 5790
-    if (window.location.port === "3000") {
-      return `${proto}//${window.location.hostname}:5790/ws`;
-    }
-
-    // 4. Automatically follow the exact browser origin (hostname + port or domain)
-    // E.g. https://projectmanager.edge.autosmartparking.com -> wss://projectmanager.edge.autosmartparking.com/ws
-    // E.g. http://localhost:5790 -> ws://localhost:5790/ws
-    return `${proto}//${window.location.host}/ws`;
-  }
-  return "ws://localhost:5790/ws";
+function Splash({ text }: { text: string }) {
+  return (
+    <div className="flex min-h-dvh items-center justify-center bg-floor font-sans">
+      <div className="flex items-center gap-3 rounded-card border border-line bg-bg px-5 py-4 text-xs font-semibold text-muted shadow-soft">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-primary" />
+        {text}
+      </div>
+    </div>
+  );
 }
 
 export function BoardChatWorkspace() {
-  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
-  const [wsConnected, setWsConnected] = useState(false);
-  const [activeTab, setActiveTab] = useState<SidebarTab>("kanban");
+  const { connected, authState, snapshot, request } = useWorkspaceSocket();
+  // null during SSR / before hydration, so server and first client render match.
+  const search = useSyncExternalStore(noopSubscribe, () => window.location.search, () => null);
+  const params = useMemo(() => new URLSearchParams(search || ""), [search]);
+  const [dismissedToken, setDismissedToken] = useState(false);
+  const [navTouched, setNavTouched] = useState(false);
+  const [nav, setNav] = useState<NavState>({ tab: "kanban", boardId: "", roomId: "", cardId: "" });
 
-  // Authentication State
-  const [activeUserId, setActiveUserId] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("pm_active_user_id");
-      if (saved) return saved;
-    }
-    return "";
-  });
+  // Deep links from email notifications (?workspace=&board=&card=&room=&tab=).
+  const deepLink = useMemo<Partial<NavState>>(() => {
+    const tab = params.get("tab") as NavState["tab"] | null;
+    const room = params.get("room");
+    const card = params.get("card");
+    const board = params.get("board");
+    return {
+      ...(board ? { boardId: board } : {}),
+      ...(card ? { cardId: card, tab: "kanban" as const } : {}),
+      ...(room ? { roomId: room, tab: "chat" as const } : {}),
+      ...(tab && TABS.includes(tab) ? { tab } : {}),
+    };
+  }, [params]);
+  const effectiveNav = useMemo(() => (navTouched ? nav : { ...nav, ...deepLink }), [navTouched, nav, deepLink]);
 
-  const [activeBoardId, setActiveBoardId] = useState<string>("");
-  const [activeRoomId, setActiveRoomId] = useState<string>("");
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-
-  const wsRef = useRef<WebSocket | null>(null);
-
-  // Enforce Clean Isometric Blue theme
-  useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.documentElement.setAttribute("data-theme", "default");
-    }
-  }, []);
-
-  const initialJoinEmail = useMemo(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("join_email") || "";
-    }
-    return "";
-  }, []);
-
-
-  const currentUser: UserDto | null = useMemo(() => {
-    if (!activeUserId || !snapshot?.users) return null;
-    return snapshot.users.find((u) => u.id === activeUserId) || null;
-  }, [activeUserId, snapshot]);
-
-  const currentUserRole = useMemo(() => {
-    if (!currentUser || !snapshot?.workspace_members) return "member";
-    const member = snapshot.workspace_members.find(
-      (m) => m.user_id === currentUser.id,
-    );
-    return member?.role || "member";
-  }, [currentUser, snapshot]);
-
-  const isCurrentUserAdmin =
-    currentUserRole === "admin" || currentUserRole === "owner";
-
-  const sendWsAction = useCallback(
-    (action: WsAction, payload: Record<string, unknown> = {}) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        setStatusMessage("WebSocket belum terhubung ke server.");
-        return;
-      }
-
-      const req = {
-        id: generateUuid(),
-        action,
-        payload: {
-          actor_id: activeUserId || undefined,
-          ...payload,
-        },
-      };
-      ws.send(JSON.stringify(req));
+  const navigate = useCallback(
+    (next: Partial<NavState>) => {
+      setNavTouched(true);
+      setNav({ ...effectiveNav, ...next });
     },
-    [activeUserId],
+    [effectiveNav],
   );
 
+  const deepWorkspace = params.get("workspace");
+  const activeWorkspaceId = snapshot?.active_workspace_id;
+  const canSwitchToDeepWorkspace = Boolean(
+    deepWorkspace && snapshot?.workspaces.some((w) => w.id === deepWorkspace),
+  );
   useEffect(() => {
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    let unmounted = false;
-
-    function connect() {
-      if (unmounted) return;
-      const ws = new WebSocket(resolveWsUrl());
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (unmounted) return;
-        setWsConnected(true);
-        setStatusMessage(null);
-      };
-
-      ws.onmessage = (evt) => {
-        try {
-          const parsed = JSON.parse(String(evt.data)) as
-            | WsBroadcastEvent
-            | WsResponseMessage;
-
-          if ("type" in parsed && parsed.type === "event" && parsed.snapshot) {
-            setSnapshot(parsed.snapshot);
-            if (initialJoinEmail) {
-              const matching = parsed.snapshot.users.find(
-                (u) => u.email.toLowerCase() === initialJoinEmail.toLowerCase(),
-              );
-              if (matching) {
-                setActiveUserId(matching.id);
-                if (typeof window !== "undefined") {
-                  localStorage.setItem("pm_active_user_id", matching.id);
-                }
-              }
-            }
-          } else if (
-            "type" in parsed &&
-            parsed.type === "response" &&
-            !parsed.ok
-          ) {
-            setStatusMessage(parsed.error || "Operasi gagal dijalankan");
-          }
-        } catch {
-          // Ignore malformed frame
-        }
-      };
-
-      ws.onclose = () => {
-        if (unmounted) return;
-        setWsConnected(false);
-        reconnectTimer = setTimeout(connect, 2000);
-      };
-
-      ws.onerror = () => {
-        ws.close();
-      };
+    if (!navTouched && canSwitchToDeepWorkspace && deepWorkspace && activeWorkspaceId && activeWorkspaceId !== deepWorkspace) {
+      request("workspace:select", { workspace_id: deepWorkspace }).catch(() => undefined);
     }
+  }, [navTouched, canSwitchToDeepWorkspace, deepWorkspace, activeWorkspaceId, request]);
 
-    connect();
+  const clearTokenFromUrl = useCallback(() => {
+    window.history.replaceState(null, "", window.location.pathname);
+    setDismissedToken(true);
+  }, []);
 
-    return () => {
-      unmounted = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      wsRef.current?.close();
-    };
-  }, [initialJoinEmail]);
+  const logout = useCallback(() => {
+    request("auth:logout").catch(() => undefined);
+    setNavTouched(true);
+    setNav({ tab: "kanban", boardId: "", roomId: "", cardId: "" });
+  }, [request]);
 
-  const activeBoard = useMemo(() => {
-    if (!snapshot?.boards?.length) return null;
+  if (search === null) return <Splash text="Memuat aplikasi..." />;
+
+  const inviteToken = params.get("invite");
+  const resetToken = params.get("reset");
+  if (inviteToken && !dismissedToken) {
+    return <InviteAcceptPage token={inviteToken} request={request} connected={connected} onDone={clearTokenFromUrl} />;
+  }
+  if (resetToken && !dismissedToken) {
+    return <ResetPasswordPage token={resetToken} request={request} connected={connected} onDone={clearTokenFromUrl} />;
+  }
+
+  if (authState === "anonymous") return <LoginPage request={request} connected={connected} />;
+  if (!snapshot) {
+    return <Splash text={connected ? "Memuat workspace..." : "Menghubungkan ke server..."} />;
+  }
+
+  const providerValue = { snapshot, request, nav: effectiveNav, navigate };
+
+  if (snapshot.me.platform_role === "developer") {
     return (
-      snapshot.boards.find((b) => b.id === activeBoardId) ||
-      snapshot.boards[0] ||
-      null
-    );
-  }, [snapshot, activeBoardId]);
-
-  const activeRoom = useMemo(() => {
-    if (!snapshot?.rooms?.length) return null;
-    return (
-      snapshot.rooms.find((r) => r.id === activeRoomId) ||
-      snapshot.rooms[0] ||
-      null
-    );
-  }, [snapshot, activeRoomId]);
-
-  const handleSelectUser = (user: UserDto) => {
-    setActiveUserId(user.id);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("pm_active_user_id", user.id);
-    }
-  };
-
-  const handleLogout = () => {
-    setActiveUserId("");
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("pm_active_user_id");
-    }
-  };
-
-  const handleEmailLogin = (email: string) => {
-    const trimmed = email.trim().toLowerCase();
-    const existing = snapshot?.users?.find(
-      (u) => u.email.toLowerCase() === trimmed,
-    );
-    if (existing) {
-      handleSelectUser(existing);
-      return;
-    }
-
-    // Auto-provision via workspace:invite_member if not existing
-    sendWsAction("workspace:invite_member", {
-      email: trimmed,
-      role: "member",
-    });
-    setStatusMessage(
-      `Sedang mendaftarkan ${trimmed} dan menyambungkan ke workspace...`,
-    );
-  };
-
-  // If user is not authenticated, render LoginPage
-  if (!currentUser) {
-    return (
-      <LoginPage
-        users={snapshot?.users || []}
-        workspaceMembers={snapshot?.workspace_members || []}
-        onSelectUser={handleSelectUser}
-        onLoginWithEmail={handleEmailLogin}
-        initialEmail={initialJoinEmail}
-        wsConnected={wsConnected}
-      />
+      <WorkspaceProvider value={providerValue}>
+        <DeveloperConsole onLogout={logout} connected={connected} />
+      </WorkspaceProvider>
     );
   }
 
-  // If authenticated, render full modern AppLayout with Navbar & Sidebar
-  return (
-    <AppLayout
-      currentUser={currentUser}
-      currentRole={currentUserRole}
-      workspaceName={snapshot?.workspaces?.[0]?.name || "Auto Smart Workspace"}
-      activeTab={activeTab}
-      onSelectTab={setActiveTab}
-      isAdminOrOwner={isCurrentUserAdmin}
-      rooms={snapshot?.rooms || []}
-      activeRoomId={activeRoom?.id || ""}
-      onSelectRoom={setActiveRoomId}
-      boards={snapshot?.boards || []}
-      activeBoardId={activeBoard?.id || ""}
-      onSelectBoard={setActiveBoardId}
-      memberCount={snapshot?.workspace_members?.length || 0}
-      wsConnected={wsConnected}
-      onLogout={handleLogout}
-    >
-      {statusMessage && (
-        <div className="mb-4 flex items-center justify-between rounded-card border border-primary/20 bg-primary-soft/50 px-4 py-2.5 text-xs font-semibold text-primary">
-          <span>{statusMessage}</span>
-          <button
-            type="button"
-            onClick={() => setStatusMessage(null)}
-            className="text-[11px] underline hover:text-ink"
-          >
-            Tutup
-          </button>
+  if (!snapshot.active_workspace_id) {
+    return (
+      <WorkspaceProvider value={providerValue}>
+        <div className="min-h-dvh space-y-5 bg-floor p-4 font-sans text-ink md:p-8">
+          <div className="mx-auto max-w-3xl space-y-4">
+            <div className="flex items-center justify-between rounded-card border border-line bg-bg p-5 shadow-soft">
+              <div>
+                <h1 className="text-lg font-bold">Halo, {snapshot.me.name}</h1>
+                <p className="text-xs text-muted">
+                  Akun Anda belum tergabung di workspace mana pun. Minta admin perusahaan mengirim undangan ke {snapshot.me.email}.
+                </p>
+              </div>
+              <button type="button" className={outlineBtn} onClick={logout}>
+                Keluar
+              </button>
+            </div>
+            <SettingsView />
+          </div>
         </div>
-      )}
+      </WorkspaceProvider>
+    );
+  }
 
-      {/* Render selected view according to sidebar tab */}
-      {activeTab === "kanban" && snapshot && (
-        <KanbanBoardView
-          snapshot={snapshot}
-          activeBoard={activeBoard}
-          onSelectBoard={setActiveBoardId}
-          sendWsAction={sendWsAction}
-        />
-      )}
+  const activeWs = snapshot.workspaces.find((w) => w.id === snapshot.active_workspace_id);
+  const isManager = activeWs?.my_role === "owner" || activeWs?.my_role === "admin";
+  const tab = effectiveNav.tab === "admin" && !isManager ? "kanban" : effectiveNav.tab;
 
-      {activeTab === "chat" && snapshot && (
-        <ChatRoomView
-          snapshot={snapshot}
-          activeRoom={activeRoom}
-          onSelectRoom={setActiveRoomId}
-          currentUserId={currentUser.id}
-          isCurrentUserAdmin={isCurrentUserAdmin}
-          sendWsAction={sendWsAction}
-        />
-      )}
-
-      {activeTab === "user" && snapshot && (
-        <UserDashboard
-          snapshot={snapshot}
-          currentUserId={currentUser.id}
-          sendWsAction={sendWsAction}
-        />
-      )}
-
-      {activeTab === "admin" && snapshot && (
-        <AdminDashboard
-          snapshot={snapshot}
-          currentUserId={currentUser.id}
-          sendWsAction={sendWsAction}
-        />
-      )}
-    </AppLayout>
+  return (
+    <WorkspaceProvider value={providerValue}>
+      <AppLayout connected={connected} onLogout={logout}>
+        {tab === "kanban" && <KanbanBoardView />}
+        {tab === "chat" && <ChatRoomView />}
+        {tab === "user" && <UserDashboard />}
+        {tab === "admin" && <AdminDashboard />}
+        {tab === "settings" && <SettingsView />}
+      </AppLayout>
+    </WorkspaceProvider>
   );
 }

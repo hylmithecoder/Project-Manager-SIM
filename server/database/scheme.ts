@@ -25,6 +25,10 @@ export const SCHEMA_TABLES = [
   "notifications",
 ] as const;
 
+// Supporting tables outside the ERD: authentication sessions and one-time
+// account tokens (workspace invitations + password resets).
+export const SUPPORT_TABLES = ["sessions", "account_tokens"] as const;
+
 const ENUM_STATEMENTS = [
   `DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'workspace_role') THEN
@@ -265,6 +269,49 @@ const CIRCULAR_FK_STATEMENTS = [
   END $$;`,
 ];
 
+// Additive, idempotent migrations for auth, platform roles, and email
+// notification preferences. Safe to re-run against existing databases.
+const AUTH_AND_PREFERENCE_STATEMENTS = [
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS platform_role varchar(20) NOT NULL DEFAULT 'user';`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_chat_email boolean NOT NULL DEFAULT true;`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_mention_email boolean NOT NULL DEFAULT true;`,
+  `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_activity_email boolean NOT NULL DEFAULT true;`,
+  `ALTER TABLE workspaces ALTER COLUMN owner_id DROP NOT NULL;`,
+  `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS email_chat_enabled boolean NOT NULL DEFAULT true;`,
+  `ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS email_activity_enabled boolean NOT NULL DEFAULT true;`,
+  `ALTER TABLE checklist_items ADD COLUMN IF NOT EXISTS due_at timestamptz NULL;`,
+  `CREATE TABLE IF NOT EXISTS sessions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash text NOT NULL UNIQUE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL
+  );`,
+  `CREATE TABLE IF NOT EXISTS account_tokens (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_hash text NOT NULL UNIQUE,
+    purpose varchar(20) NOT NULL CHECK (purpose IN ('invite', 'reset')),
+    email varchar(255) NOT NULL,
+    user_id uuid NULL REFERENCES users(id) ON DELETE CASCADE,
+    workspace_id uuid NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    role workspace_role NULL,
+    created_by uuid NULL REFERENCES users(id) ON DELETE SET NULL,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz NULL,
+    revoked_at timestamptz NULL
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id);`,
+  `CREATE INDEX IF NOT EXISTS idx_account_tokens_workspace ON account_tokens (workspace_id, purpose);`,
+  `CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications (user_id, created_at DESC);`,
+  // Early seeds stored theme token names; labels now always hold hex colors.
+  `UPDATE labels SET color = CASE color
+     WHEN 'danger' THEN '#e5534b' WHEN 'primary' THEN '#3b63d6' WHEN 'success' THEN '#2fa36b'
+     ELSE '#3b63d6' END
+   WHERE color !~ '^#[0-9a-fA-F]{6}$';`,
+];
+
 // Indexes specified in PDF Page 10
 const INDEX_STATEMENTS = [
   `CREATE INDEX IF NOT EXISTS idx_messages_room_created ON messages (room_id, created_at DESC);`,
@@ -297,6 +344,10 @@ export async function migrateSchema(
   }
 
   for (const stmt of INDEX_STATEMENTS) {
+    await sql.unsafe(stmt);
+  }
+
+  for (const stmt of AUTH_AND_PREFERENCE_STATEMENTS) {
     await sql.unsafe(stmt);
   }
 

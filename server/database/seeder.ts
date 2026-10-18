@@ -148,9 +148,9 @@ export async function seedDatabase(
     await tx`
       INSERT INTO labels (id, board_id, name, color)
       VALUES
-        (${SEED_IDS.labels.urgent}, ${SEED_IDS.board}, 'Prioritas', 'danger'),
-        (${SEED_IDS.labels.backend}, ${SEED_IDS.board}, 'Bun Backend', 'primary'),
-        (${SEED_IDS.labels.uiux}, ${SEED_IDS.board}, 'Isometric UI', 'success')
+        (${SEED_IDS.labels.urgent}, ${SEED_IDS.board}, 'Prioritas', '#e5534b'),
+        (${SEED_IDS.labels.backend}, ${SEED_IDS.board}, 'Bun Backend', '#3b63d6'),
+        (${SEED_IDS.labels.uiux}, ${SEED_IDS.board}, 'Isometric UI', '#2fa36b')
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         color = EXCLUDED.color

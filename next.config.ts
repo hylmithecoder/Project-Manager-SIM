@@ -2,7 +2,24 @@ import type { NextConfig } from "next";
 
 const isStaticExport = process.env.STATIC_EXPORT === "true";
 
+// Bun backend (WebSocket + upload + REST) that `next dev` proxies to, so the
+// browser can always talk to the same origin it loaded the page from
+// (e.g. https://projectmanager.edge.autosmartparking.com/ws -> :5790/ws).
+const backendOrigin =
+  process.env.BACKEND_ORIGIN ||
+  `http://127.0.0.1:${process.env.APP_SERVER_PORT || 5790}`;
+
+const devOrigins = (process.env.ALLOWED_DEV_ORIGINS || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 const nextConfig: NextConfig = {
+  allowedDevOrigins: [
+    "projectmanager.edge.autosmartparking.com",
+    "*.autosmartparking.com",
+    ...devOrigins,
+  ],
   ...(isStaticExport
     ? {
         output: "export",
@@ -14,6 +31,22 @@ const nextConfig: NextConfig = {
         },
         cacheComponents: true,
         partialPrefetching: true,
+        // External rewrites are proxied by Next.js, including WebSocket
+        // upgrade requests (see router-server upgradeHandler).
+        async rewrites() {
+          return {
+            beforeFiles: [
+              { source: "/ws", destination: `${backendOrigin}/ws` },
+              { source: "/api/:path*", destination: `${backendOrigin}/api/:path*` },
+              { source: "/uploads/:path*", destination: `${backendOrigin}/uploads/:path*` },
+              { source: "/health", destination: `${backendOrigin}/health` },
+              { source: "/docs", destination: `${backendOrigin}/docs` },
+              { source: "/openapi.json", destination: `${backendOrigin}/openapi.json` },
+            ],
+            afterFiles: [],
+            fallback: [],
+          };
+        },
       }),
   turbopack: {
     rules: {

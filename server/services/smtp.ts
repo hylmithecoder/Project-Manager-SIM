@@ -10,6 +10,21 @@ export interface SmtpConfig {
   enabled: boolean;
 }
 
+/** RFC 2047 encoded-word so non-ASCII subjects survive transport. */
+export function encodeHeaderValue(value: string): string {
+  if (/^[\x20-\x7e]*$/.test(value)) return value;
+  return `=?UTF-8?B?${Buffer.from(value, "utf8").toString("base64")}?=`;
+}
+
+/** Normalises line endings and escapes lines starting with "." (RFC 5321 4.5.2). */
+export function dotStuff(body: string): string {
+  return body
+    .replace(/\r?\n/g, "\r\n")
+    .split("\r\n")
+    .map((line) => (line.startsWith(".") ? `.${line}` : line))
+    .join("\r\n");
+}
+
 export function getSmtpConfig(): SmtpConfig {
   const host = process.env.SMTP_HOST || "smtp.gmail.com";
   const port = Number(process.env.SMTP_PORT || 587);
@@ -284,14 +299,14 @@ export async function sendEmail(
     const emailContent = [
       `From: ${fromHeader}`,
       `To: <${opts.to}>`,
-      `Subject: ${opts.subject}`,
+      `Subject: ${encodeHeaderValue(opts.subject)}`,
       `Message-ID: ${messageId}`,
       `Date: ${new Date().toUTCString()}`,
       `MIME-Version: 1.0`,
       `Content-Type: text/html; charset=UTF-8`,
       `Content-Transfer-Encoding: 8bit`,
       ``,
-      opts.html,
+      dotStuff(opts.html),
       `.`,
     ].join("\r\n");
 
@@ -309,56 +324,4 @@ export async function sendEmail(
   } finally {
     session?.close();
   }
-}
-
-export async function sendWorkspaceInvitationEmail(params: {
-  toEmail: string;
-  toName: string;
-  inviterName: string;
-  workspaceName: string;
-  joinUrl: string;
-}): Promise<{ ok: boolean; messageId: string; error?: string }> {
-  const subject = `Undangan Bergabung ke Workspace "${params.workspaceName}"`;
-  const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: 'Plus Jakarta Sans', Arial, sans-serif; background: #eef1f7; margin: 0; padding: 24px; color: #1b2440; }
-    .card { max-width: 540px; margin: 0 auto; background: #ffffff; border-radius: 20px; padding: 32px; border: 1px solid #dce3ee; box-shadow: 0 6px 16px rgba(27,36,64,0.08); }
-    .badge { display: inline-block; background: #e9eefb; color: #3b63d6; font-size: 12px; font-weight: bold; padding: 6px 12px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.1em; }
-    h1 { font-size: 24px; font-weight: 800; color: #1b2440; margin-top: 16px; line-height: 1.3; }
-    p { font-size: 15px; line-height: 1.6; color: #6b7488; }
-    .btn { display: inline-block; background: #3b63d6; color: #ffffff !important; text-decoration: none; padding: 14px 28px; border-radius: 16px; font-weight: 700; font-size: 15px; margin-top: 20px; box-shadow: 0 8px 20px rgba(59,99,214,0.3); }
-    .footer { margin-top: 32px; border-top: 1px solid #dce3ee; padding-top: 16px; font-size: 12px; color: #9aa3b5; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <div class="badge">Undangan Workspace</div>
-    <h1>Hai ${params.toName}, Anda Telah Diundang!</h1>
-    <p>
-      <strong>${params.inviterName}</strong> telah mengundang Anda untuk bergabung ke ruang kerja
-      <strong>"${params.workspaceName}"</strong> pada platform <em>Task Board + Chat Grup Terintegrasi</em>.
-    </p>
-    <p>
-      Akun Anda telah disiapkan sebagai <strong>User Biasa (Member)</strong>. Anda dapat langsung mengelola tugas yang ditugaskan, mencentang checklist, dan berkolaborasi dalam ruang diskusi real-time.
-    </p>
-    <p style="text-align: center;">
-      <a href="${params.joinUrl}" class="btn">Buka Workspace Sekarang</a>
-    </p>
-    <div class="footer">
-      Email ini dikirim otomatis oleh sistem notifikasi Auto Smart Parking Workspace. Jika Anda tidak mengenali pengirim ini, Anda dapat mengabaikan email ini.
-    </div>
-  </div>
-</body>
-</html>
-`;
-
-  return sendEmail({
-    to: params.toEmail,
-    subject,
-    html,
-  });
 }

@@ -1,475 +1,496 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ClockIcon, EditIcon, PlusIcon, TrashIcon } from "@/components/icons";
-import { Button } from "@/components/ui/button";
-import type {
-  BoardDto,
-  WorkspaceSnapshot,
-  WsAction,
-} from "@/server/ws/protocol";
+import {
+  ArrowRightIcon,
+  ChatIcon,
+  CheckIcon,
+  ClockIcon,
+  EditIcon,
+  LinkIcon,
+  LockIcon,
+  PlusIcon,
+  SettingsIcon,
+  TrashIcon,
+} from "@/components/icons";
+import {
+  Avatar,
+  DUE_CLASS,
+  EmptyState,
+  Modal,
+  Toggle,
+  cardClass,
+  dueStatus,
+  formatDateTime,
+  inputClass,
+  labelColor,
+  outlineBtn,
+  primaryBtn,
+  smallInputClass,
+  timeAgo,
+  useWorkspace,
+} from "@/components/ui/kit";
+import type { BoardDto, CardDto } from "@/server/ws/protocol";
+import { CardDetailModal } from "./card-detail-modal";
 
-interface KanbanBoardViewProps {
-  snapshot: WorkspaceSnapshot;
-  activeBoard: BoardDto | null;
-  onSelectBoard: (boardId: string) => void;
-  sendWsAction: (action: WsAction, payload?: Record<string, unknown>) => void;
-}
+export function KanbanBoardView() {
+  const { snapshot, nav, navigate, run } = useWorkspace();
+  const activeWs = snapshot.workspaces.find((w) => w.id === snapshot.active_workspace_id);
+  const myRole = activeWs?.my_role || "guest";
+  const canWrite = myRole !== "guest";
+  const board = snapshot.boards.find((b) => b.id === nav.boardId) || snapshot.boards[0] || null;
+  const canManageBoard =
+    !!board && (myRole === "owner" || myRole === "admin" || (board.created_by === snapshot.me.id && canWrite));
 
-export function KanbanBoardView({
-  snapshot,
-  activeBoard,
-  onSelectBoard,
-  sendWsAction,
-}: KanbanBoardViewProps) {
-  const [newBoardName, setNewBoardName] = useState("");
+  const [newBoardOpen, setNewBoardOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [newListName, setNewListName] = useState("");
-  const [newCardTitleByList, setNewCardTitleByList] = useState<
-    Record<string, string>
-  >({});
-  const [newCardDescByList, setNewCardDescByList] = useState<
-    Record<string, string>
-  >({});
-  const [newChecklistTextByCard, setNewChecklistTextByCard] = useState<
-    Record<string, string>
-  >({});
-  const [editingCardId, setEditingCardId] = useState<string | null>(null);
-  const [editTitle, setEditTitle] = useState("");
-  const [editDesc, setEditDesc] = useState("");
+  const [cardDraft, setCardDraft] = useState<Record<string, string>>({});
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [dragCardId, setDragCardId] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{ listId: string; index: number } | null>(null);
+  const [filterMine, setFilterMine] = useState(false);
 
-  const boardLists = useMemo(() => {
-    if (!activeBoard) return [];
-    return (snapshot?.lists || [])
-      .filter((l) => l.board_id === activeBoard.id && !l.archived_at)
-      .sort((a, b) => a.position - b.position);
-  }, [snapshot, activeBoard]);
-
-  const boardCards = useMemo(() => {
-    if (!activeBoard) return [];
-    return (snapshot?.cards || [])
-      .filter((c) => c.board_id === activeBoard.id && !c.archived_at)
-      .sort((a, b) => a.position - b.position);
-  }, [snapshot, activeBoard]);
-
-
-  const labelsMap = useMemo(() => {
-    const map = new Map<string, { name: string; color: string }>();
-    for (const l of snapshot?.labels || []) {
-      map.set(l.id, { name: l.name, color: l.color });
+  const lists = useMemo(
+    () => (board ? snapshot.lists.filter((l) => l.board_id === board.id).sort((a, b) => a.position - b.position) : []),
+    [snapshot.lists, board],
+  );
+  const cardsByList = useMemo(() => {
+    const map = new Map<string, CardDto[]>();
+    if (!board) return map;
+    for (const c of snapshot.cards) {
+      if (c.board_id !== board.id) continue;
+      if (filterMine && !c.assignee_ids.includes(snapshot.me.id)) continue;
+      map.set(c.list_id, [...(map.get(c.list_id) || []), c]);
     }
+    for (const arr of map.values()) arr.sort((a, b) => a.position - b.position);
     return map;
-  }, [snapshot]);
+  }, [snapshot.cards, snapshot.me.id, board, filterMine]);
+  const userById = useMemo(() => new Map(snapshot.users.map((u) => [u.id, u])), [snapshot.users]);
+  const openCard = snapshot.cards.find((c) => c.id === nav.cardId);
+  const activities = board ? snapshot.activities.filter((a) => a.board_id === board.id).slice(0, 12) : [];
+
+  const drop = (listId: string, index: number) => {
+    if (!dragCardId) return;
+    const card = snapshot.cards.find((c) => c.id === dragCardId);
+    setDragCardId(null);
+    setDropHint(null);
+    if (!card) return;
+    const siblings = cardsByList.get(listId) || [];
+    const currentIndex = siblings.findIndex((c) => c.id === card.id);
+    if (card.list_id === listId && (currentIndex === index || currentIndex === index - 1)) return;
+    const targetIndex = card.list_id === listId && currentIndex >= 0 && currentIndex < index ? index - 1 : index;
+    run("card:move", { card_id: card.id, target_list_id: listId, target_index: targetIndex });
+  };
+
+  if (!board) {
+    return (
+      <div className="space-y-4">
+        <EmptyState title="Belum ada board di workspace ini">
+          {canWrite ? "Buat board pertama untuk mulai mengelola tugas tim." : "Tunggu admin membuat board."}
+        </EmptyState>
+        {canWrite && (
+          <div className="flex justify-center">
+            <button type="button" className={primaryBtn} onClick={() => setNewBoardOpen(true)}>
+              <PlusIcon className="h-4 w-4" /> Board baru
+            </button>
+          </div>
+        )}
+        <NewBoardModal open={newBoardOpen} onClose={() => setNewBoardOpen(false)} />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      {/* Board Selector & Add Board / List Section */}
-      <section className="rounded-card border border-line bg-bg p-4 shadow-soft">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider text-muted">
-              Papan Aktif:
-            </span>
-            {(snapshot?.boards || []).map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => onSelectBoard(b.id)}
-                className={`rounded-card px-3.5 py-1.5 text-xs font-semibold transition ${
-                  activeBoard?.id === b.id
-                    ? "bg-primary text-on-primary"
-                    : "border border-line bg-floor text-ink hover:border-primary hover:text-primary"
-                }`}
-              >
-                {b.name}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              type="text"
-              value={newBoardName}
-              onChange={(e) => setNewBoardName(e.target.value)}
-              placeholder="Nama board baru..."
-              className="h-9 rounded-card border border-line bg-floor px-3 text-xs text-ink placeholder:text-muted focus:border-primary focus:bg-bg focus:outline-none"
-            />
-            <Button
+    <div className="space-y-4">
+      <section className={`${cardClass} flex flex-wrap items-center justify-between gap-3`}>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {snapshot.boards.map((b) => (
+            <button
+              key={b.id}
               type="button"
-              variant="outline"
-              onClick={() => {
-                if (!newBoardName.trim()) return;
-                sendWsAction("board:create", { name: newBoardName.trim() });
-                setNewBoardName("");
-              }}
-              className="!h-9 !px-3 !text-xs font-semibold"
+              onClick={() => navigate({ boardId: b.id })}
+              className={`flex cursor-pointer items-center gap-1.5 rounded-card px-3.5 py-1.5 text-xs font-semibold transition ${
+                board.id === b.id ? "bg-primary text-on-primary" : "border border-line bg-floor text-ink hover:border-primary hover:text-primary"
+              }`}
             >
-              <PlusIcon className="h-3.5 w-3.5" />
-              Buat Board
-            </Button>
-
-            <input
-              type="text"
-              value={newListName}
-              onChange={(e) => setNewListName(e.target.value)}
-              placeholder="Tambah kolom list..."
-              className="h-9 rounded-card border border-line bg-floor px-3 text-xs text-ink placeholder:text-muted focus:border-primary focus:bg-bg focus:outline-none"
-            />
-            <Button
-              type="button"
-              variant="primary"
-              onClick={() => {
-                if (!newListName.trim() || !activeBoard) return;
-                sendWsAction("list:create", {
-                  board_id: activeBoard.id,
-                  name: newListName.trim(),
-                });
-                setNewListName("");
-              }}
-              className="!h-9 !px-3 !text-xs font-semibold"
-            >
-              <PlusIcon className="h-3.5 w-3.5" />
-              Tambah List
-            </Button>
-          </div>
+              {b.visibility === "private" && <LockIcon className="h-3 w-3" />}
+              {b.name}
+            </button>
+          ))}
+          {canWrite && (
+            <button type="button" onClick={() => setNewBoardOpen(true)} className={outlineBtn}>
+              <PlusIcon className="h-3.5 w-3.5" /> Board
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-2 text-[11px] font-semibold text-muted">
+            <Toggle checked={filterMine} onChange={setFilterMine} /> Tugas saya
+          </label>
+          {board.room_id && (
+            <button type="button" className={outlineBtn} onClick={() => navigate({ tab: "chat", roomId: board.room_id! })}>
+              <ChatIcon className="h-3.5 w-3.5" /> Diskusi board
+            </button>
+          )}
+          {canManageBoard && (
+            <button type="button" className={outlineBtn} onClick={() => setSettingsOpen(true)}>
+              <SettingsIcon className="h-3.5 w-3.5" /> Atur
+            </button>
+          )}
         </div>
       </section>
 
-      {/* Columns Grid */}
-      <section className="space-y-4">
-        {boardLists.length === 0 ? (
-          <div className="rounded-card border border-line bg-bg p-8 text-center text-xs text-muted">
-            Belum ada kolom list pada papan ini. Buat kolom baru menggunakan form di atas.
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-start">
-            {boardLists.map((list) => {
-              const cardsInList = boardCards.filter((c) => c.list_id === list.id);
-              return (
-                <div
-                  key={list.id}
-                  className="flex flex-col rounded-card border border-line bg-bg p-3.5 shadow-soft"
-                >
-                  <div className="mb-3 flex items-center justify-between gap-2 border-b border-line pb-2">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-sm font-bold text-ink">{list.name}</h2>
-                      <span className="inline-flex items-center rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-bold text-primary">
-                        {cardsInList.length}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        sendWsAction("list:delete", { list_id: list.id })
-                      }
-                      title="Arsipkan kolom list"
-                      className="text-[11px] font-semibold text-muted hover:text-danger"
-                    >
-                      Arsip
+      {!canWrite && (
+        <div className="rounded-card border border-line bg-bg px-4 py-2.5 text-[11px] text-muted">
+          Anda bergabung sebagai <strong>tamu</strong>: dapat melihat board dan berdiskusi di chat, tetapi tidak mengubah tugas.
+        </div>
+      )}
+
+      <div className="flex items-start gap-4 overflow-x-auto pb-4">
+        {lists.map((list, listIdx) => {
+          const cards = cardsByList.get(list.id) || [];
+          return (
+            <div
+              key={list.id}
+              className={`flex w-72 shrink-0 flex-col rounded-card border bg-bg p-3 shadow-soft transition ${
+                dropHint?.listId === list.id ? "border-primary" : "border-line"
+              }`}
+              onDragOver={(e) => {
+                if (!dragCardId) return;
+                e.preventDefault();
+                if (dropHint?.listId !== list.id) setDropHint({ listId: list.id, index: cards.length });
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                drop(list.id, dropHint?.listId === list.id ? dropHint.index : cards.length);
+              }}
+            >
+              <div className="mb-3 flex items-center justify-between gap-2 border-b border-line pb-2">
+                {renaming?.id === list.id ? (
+                  <form
+                    className="flex-1"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (await run("list:update", { list_id: list.id, name: renaming.name })) setRenaming(null);
+                    }}
+                  >
+                    <input autoFocus value={renaming.name} onChange={(e) => setRenaming({ id: list.id, name: e.target.value })} onBlur={() => setRenaming(null)} className={smallInputClass} />
+                  </form>
+                ) : (
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h2 className="truncate text-sm font-bold">{list.name}</h2>
+                    <span className="rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-bold text-primary">{cards.length}</span>
+                  </div>
+                )}
+                {canWrite && renaming?.id !== list.id && (
+                  <div className="flex shrink-0 items-center gap-1 text-muted">
+                    <button type="button" title="Geser kiri" disabled={listIdx === 0} onClick={() => run("list:move", { list_id: list.id, direction: -1 })} className="cursor-pointer rotate-180 hover:text-primary disabled:opacity-30">
+                      <ArrowRightIcon className="h-3.5 w-3.5" />
                     </button>
-                  </div>
-
-                  {/* List Cards */}
-                  <div className="space-y-3">
-                    {cardsInList.map((card) => {
-                      const isEditing = editingCardId === card.id;
-                      const doneCount = card.checklist_items.filter(
-                        (i) => i.is_done,
-                      ).length;
-                      const totalChecklist = card.checklist_items.length;
-
-                      return (
-                        <div
-                          key={card.id}
-                          className="rounded-card border border-line bg-floor/60 p-3 text-xs transition hover:border-primary/50 hover:bg-bg"
-                        >
-                          {/* Label Tags */}
-                          {card.label_ids.length > 0 && (
-                            <div className="mb-1.5 flex flex-wrap gap-1">
-                              {card.label_ids.map((lid) => {
-                                const l = labelsMap.get(lid);
-                                if (!l) return null;
-                                return (
-                                  <span
-                                    key={lid}
-                                    style={{
-                                      backgroundColor: `${l.color}20`,
-                                      borderColor: `${l.color}40`,
-                                      color: l.color,
-                                    }}
-                                    className="rounded border px-1.5 py-0.2 text-[10px] font-bold"
-                                  >
-                                    {l.name}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {isEditing ? (
-                            <div className="space-y-2">
-                              <input
-                                type="text"
-                                value={editTitle}
-                                onChange={(e) => setEditTitle(e.target.value)}
-                                className="w-full rounded border border-primary bg-bg p-1.5 text-xs text-ink focus:outline-none"
-                              />
-                              <textarea
-                                value={editDesc}
-                                onChange={(e) => setEditDesc(e.target.value)}
-                                rows={2}
-                                className="w-full rounded border border-line bg-bg p-1.5 text-xs text-ink focus:outline-none"
-                              />
-                              <div className="flex gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    sendWsAction("card:update", {
-                                      card_id: card.id,
-                                      title: editTitle.trim(),
-                                      description: editDesc.trim(),
-                                    });
-                                    setEditingCardId(null);
-                                  }}
-                                  className="rounded bg-primary px-2.5 py-1 text-[11px] font-semibold text-on-primary"
-                                >
-                                  Simpan
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingCardId(null)}
-                                  className="rounded border border-line px-2.5 py-1 text-[11px] text-muted hover:text-ink"
-                                >
-                                  Batal
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <div className="flex items-start justify-between gap-2">
-                                <h3 className="font-semibold text-ink leading-tight">
-                                  {card.title}
-                                </h3>
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setEditingCardId(card.id);
-                                      setEditTitle(card.title);
-                                      setEditDesc(card.description || "");
-                                    }}
-                                    className="text-muted hover:text-primary"
-                                    title="Edit tugas"
-                                  >
-                                    <EditIcon className="h-3 w-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      sendWsAction("card:delete", {
-                                        card_id: card.id,
-                                      })
-                                    }
-                                    className="text-muted hover:text-danger"
-                                    title="Hapus tugas"
-                                  >
-                                    <TrashIcon className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              </div>
-
-                              {card.description && (
-                                <p className="mt-1 text-[11px] text-muted line-clamp-2">
-                                  {card.description}
-                                </p>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Checklist Items */}
-                          {totalChecklist > 0 && (
-                            <div className="mt-2.5 space-y-1 border-t border-line/60 pt-2">
-                              <div className="flex items-center justify-between text-[10px] font-semibold text-muted">
-                                <span>Checklist</span>
-                                <span>
-                                  {doneCount}/{totalChecklist}
-                                </span>
-                              </div>
-                              <div className="space-y-1">
-                                {card.checklist_items.map((item) => (
-                                  <div
-                                    key={item.id}
-                                    className="flex items-center justify-between gap-1.5"
-                                  >
-                                    <label className="flex items-center gap-1.5 text-[11px] text-ink cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={item.is_done}
-                                        onChange={() =>
-                                          sendWsAction("checklist:toggle_item", {
-                                            item_id: item.id,
-                                          })
-                                        }
-                                        className="h-3.5 w-3.5 rounded border-line text-primary focus:ring-0"
-                                      />
-                                      <span
-                                        className={
-                                          item.is_done
-                                            ? "line-through text-muted"
-                                            : ""
-                                        }
-                                      >
-                                        {item.content}
-                                      </span>
-                                    </label>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        sendWsAction("checklist:delete_item", {
-                                          item_id: item.id,
-                                        })
-                                      }
-                                      className="text-muted hover:text-danger"
-                                      title="Hapus checklist"
-                                    >
-                                      <TrashIcon className="h-2.5 w-2.5" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Add Checklist Input */}
-                          <div className="mt-2 flex gap-1">
-                            <input
-                              type="text"
-                              value={newChecklistTextByCard[card.id] || ""}
-                              onChange={(e) =>
-                                setNewChecklistTextByCard((prev) => ({
-                                  ...prev,
-                                  [card.id]: e.target.value,
-                                }))
-                              }
-                              placeholder="Tambah checklist..."
-                              className="h-7 w-full rounded border border-line bg-bg px-2 text-[10px] text-ink placeholder:text-muted focus:border-primary focus:outline-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const text =
-                                  newChecklistTextByCard[card.id]?.trim();
-                                if (!text) return;
-                                sendWsAction("checklist:add_item", {
-                                  card_id: card.id,
-                                  content: text,
-                                });
-                                setNewChecklistTextByCard((prev) => ({
-                                  ...prev,
-                                  [card.id]: "",
-                                }));
-                              }}
-                              className="rounded bg-floor border border-line px-2 text-[10px] font-semibold text-ink hover:border-primary hover:text-primary"
-                            >
-                              +
-                            </button>
-                          </div>
-
-                          {/* Footer: Due date & Move Column */}
-                          <div className="mt-2.5 flex items-center justify-between border-t border-line/60 pt-2 text-[10px] text-muted">
-                            <div className="flex items-center gap-1">
-                              <ClockIcon className="h-3 w-3" />
-                              <span>
-                                {card.due_at
-                                  ? new Date(card.due_at).toLocaleDateString(
-                                      "id-ID",
-                                      { day: "numeric", month: "short" },
-                                    )
-                                  : "Tanpa due"}
-                              </span>
-                            </div>
-
-                            {/* Move to another list */}
-                            <select
-                              value={card.list_id}
-                              onChange={(e) => {
-                                sendWsAction("card:move", {
-                                  card_id: card.id,
-                                  target_list_id: e.target.value,
-                                });
-                              }}
-                              className="rounded border border-line bg-bg px-1.5 py-0.5 text-[10px] font-medium text-ink focus:border-primary focus:outline-none"
-                            >
-                              {boardLists.map((targetList) => (
-                                <option key={targetList.id} value={targetList.id}>
-                                  Pindah: {targetList.name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Form Tambah Card Baru di Bawah Kolom */}
-                  <div className="mt-3 border-t border-line pt-3 space-y-1.5">
-                    <input
-                      type="text"
-                      value={newCardTitleByList[list.id] || ""}
-                      onChange={(e) =>
-                        setNewCardTitleByList((prev) => ({
-                          ...prev,
-                          [list.id]: e.target.value,
-                        }))
-                      }
-                      placeholder="Judul kartu baru..."
-                      className="h-8 w-full rounded border border-line bg-floor px-2.5 text-xs text-ink placeholder:text-muted focus:border-primary focus:bg-bg focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      value={newCardDescByList[list.id] || ""}
-                      onChange={(e) =>
-                        setNewCardDescByList((prev) => ({
-                          ...prev,
-                          [list.id]: e.target.value,
-                        }))
-                      }
-                      placeholder="Keterangan singkat (opsional)..."
-                      className="h-7 w-full rounded border border-line bg-floor px-2.5 text-[11px] text-ink placeholder:text-muted focus:border-primary focus:bg-bg focus:outline-none"
-                    />
+                    <button type="button" title="Geser kanan" disabled={listIdx === lists.length - 1} onClick={() => run("list:move", { list_id: list.id, direction: 1 })} className="cursor-pointer hover:text-primary disabled:opacity-30">
+                      <ArrowRightIcon className="h-3.5 w-3.5" />
+                    </button>
+                    <button type="button" title="Ganti nama" onClick={() => setRenaming({ id: list.id, name: list.name })} className="cursor-pointer hover:text-primary">
+                      <EditIcon className="h-3.5 w-3.5" />
+                    </button>
                     <button
                       type="button"
+                      title="Arsipkan kolom"
                       onClick={() => {
-                        const title = newCardTitleByList[list.id]?.trim();
-                        if (!title || !activeBoard) return;
-                        sendWsAction("card:create", {
-                          board_id: activeBoard.id,
-                          list_id: list.id,
-                          title,
-                          description:
-                            newCardDescByList[list.id]?.trim() || null,
-                        });
-                        setNewCardTitleByList((prev) => ({
-                          ...prev,
-                          [list.id]: "",
-                        }));
-                        setNewCardDescByList((prev) => ({
-                          ...prev,
-                          [list.id]: "",
-                        }));
+                        if (window.confirm(`Arsipkan kolom "${list.name}" beserta card di dalamnya?`)) run("list:delete", { list_id: list.id });
                       }}
-                      className="flex w-full items-center justify-center gap-1.5 rounded bg-primary py-1.5 text-xs font-semibold text-on-primary hover:bg-primary-strong"
+                      className="cursor-pointer hover:text-danger"
                     >
-                      <PlusIcon className="h-3 w-3" />
-                      Tambah Kartu
+                      <TrashIcon className="h-3.5 w-3.5" />
                     </button>
                   </div>
+                )}
+              </div>
+
+              <div className="min-h-8 space-y-2.5">
+                {cards.map((card, idx) => (
+                  <div key={card.id}>
+                    {dropHint?.listId === list.id && dropHint.index === idx && dragCardId && <div className="mb-2 h-1 rounded-full bg-primary" />}
+                    <CardPreview
+                      card={card}
+                      draggable={canWrite}
+                      userName={(id) => userById.get(id)?.name || "?"}
+                      labels={snapshot.labels}
+                      onOpen={() => navigate({ cardId: card.id })}
+                      onDragStart={() => setDragCardId(card.id)}
+                      onDragEnd={() => {
+                        setDragCardId(null);
+                        setDropHint(null);
+                      }}
+                      onDragOver={(e) => {
+                        if (!dragCardId) return;
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                        const index = e.clientY < rect.top + rect.height / 2 ? idx : idx + 1;
+                        if (dropHint?.listId !== list.id || dropHint.index !== index) setDropHint({ listId: list.id, index });
+                      }}
+                    />
+                  </div>
+                ))}
+                {dropHint?.listId === list.id && dropHint.index === cards.length && dragCardId && <div className="h-1 rounded-full bg-primary" />}
+              </div>
+
+              {canWrite && (
+                <form
+                  className="mt-3 flex gap-1.5 border-t border-line pt-3"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const title = cardDraft[list.id]?.trim();
+                    if (!title) return;
+                    if (await run("card:create", { list_id: list.id, title })) setCardDraft((p) => ({ ...p, [list.id]: "" }));
+                  }}
+                >
+                  <input value={cardDraft[list.id] || ""} onChange={(e) => setCardDraft((p) => ({ ...p, [list.id]: e.target.value }))} placeholder="Judul card baru..." className={smallInputClass} />
+                  <button type="submit" className={`${primaryBtn} px-2.5`} aria-label="Tambah card">
+                    <PlusIcon className="h-3.5 w-3.5" />
+                  </button>
+                </form>
+              )}
+            </div>
+          );
+        })}
+
+        {canWrite && (
+          <form
+            className="w-64 shrink-0 space-y-2 rounded-card border border-dashed border-line bg-bg/60 p-3"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!newListName.trim()) return;
+              if (await run("list:create", { board_id: board.id, name: newListName })) setNewListName("");
+            }}
+          >
+            <input value={newListName} onChange={(e) => setNewListName(e.target.value)} placeholder="Nama kolom baru..." className={smallInputClass} />
+            <button type="submit" className={`${outlineBtn} w-full`}>
+              <PlusIcon className="h-3.5 w-3.5" /> Tambah kolom
+            </button>
+          </form>
+        )}
+      </div>
+
+      <section className={cardClass}>
+        <h3 className="mb-3 text-xs font-bold">Aktivitas terbaru di board ini</h3>
+        {activities.length === 0 && <div className="text-[11px] text-muted">Belum ada aktivitas.</div>}
+        <div className="grid gap-2 md:grid-cols-2">
+          {activities.map((a) => {
+            const card = a.card_id ? snapshot.cards.find((c) => c.id === a.card_id) : null;
+            return (
+              <div key={a.id} className="flex items-start gap-2 text-[11px]">
+                <Avatar name={a.actor_name} size="sm" />
+                <div className="min-w-0">
+                  <span className="font-semibold">{a.actor_name}</span> <span className="text-muted">{a.action.replace(/_/g, " ")}</span>
+                  {card && (
+                    <button type="button" onClick={() => navigate({ cardId: card.id })} className="ml-1 cursor-pointer font-semibold text-primary hover:underline">
+                      {card.title}
+                    </button>
+                  )}
+                  <div className="text-[10px] text-subtle">{timeAgo(a.created_at)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <NewBoardModal open={newBoardOpen} onClose={() => setNewBoardOpen(false)} />
+      {settingsOpen && <BoardSettingsModal board={board} onClose={() => setSettingsOpen(false)} />}
+      {openCard && openCard.board_id === board.id && (
+        <CardDetailModal key={openCard.id} card={openCard} canWrite={canWrite} onClose={() => navigate({ cardId: "" })} />
+      )}
+    </div>
+  );
+}
+
+function CardPreview({
+  card,
+  draggable,
+  labels,
+  userName,
+  onOpen,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+}: {
+  card: CardDto;
+  draggable: boolean;
+  labels: { id: string; name: string; color: string }[];
+  userName: (id: string) => string;
+  onOpen: () => void;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+}) {
+  const done = card.checklist_items.filter((i) => i.is_done).length;
+  const total = card.checklist_items.length;
+  const status = dueStatus(card.due_at, card.completed_at);
+  return (
+    <div
+      draggable={draggable}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onClick={onOpen}
+      className={`cursor-pointer rounded-card border border-line bg-floor/60 p-3 text-xs transition hover:border-primary/50 hover:bg-bg ${card.completed_at ? "opacity-75" : ""}`}
+    >
+      {card.label_ids.length > 0 && (
+        <div className="mb-1.5 flex flex-wrap gap-1">
+          {card.label_ids.map((lid) => {
+            const l = labels.find((x) => x.id === lid);
+            if (!l) return null;
+            const c = labelColor(l.color);
+            return (
+              <span key={lid} style={{ backgroundColor: `${c}1f`, color: c }} className="rounded px-1.5 py-0.5 text-[10px] font-bold">
+                {l.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      <div className={`leading-snug font-semibold ${card.completed_at ? "text-muted line-through" : "text-ink"}`}>{card.title}</div>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted">
+        {card.due_at && (
+          <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 font-semibold ${DUE_CLASS[status]}`}>
+            <ClockIcon className="h-3 w-3" />
+            {formatDateTime(card.due_at)}
+          </span>
+        )}
+        {total > 0 && (
+          <span className={`inline-flex items-center gap-1 ${done === total ? "font-semibold text-success" : ""}`}>
+            <CheckIcon className="h-3 w-3" />
+            {done}/{total}
+          </span>
+        )}
+        {card.attachments.length > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <LinkIcon className="h-3 w-3" />
+            {card.attachments.length}
+          </span>
+        )}
+        {card.room_id && <ChatIcon className="h-3 w-3" />}
+        {card.assignee_ids.length > 0 && (
+          <span className="ml-auto flex -space-x-1.5">
+            {card.assignee_ids.slice(0, 3).map((id) => (
+              <span key={id} title={userName(id)}>
+                <Avatar name={userName(id)} size="sm" />
+              </span>
+            ))}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NewBoardModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { snapshot, run, navigate } = useWorkspace();
+  const [name, setName] = useState("");
+  const [isPrivate, setIsPrivate] = useState(false);
+  return (
+    <Modal open={open} onClose={onClose} title="Board baru">
+      <form
+        className="space-y-3"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const res = await run<{ id: string }>(
+            "board:create",
+            { workspace_id: snapshot.active_workspace_id, name, visibility: isPrivate ? "private" : "workspace" },
+            "Board dibuat",
+          );
+          if (res) {
+            setName("");
+            onClose();
+            navigate({ tab: "kanban", boardId: res.id });
+          }
+        }}
+      >
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Nama board" className={inputClass} />
+        <label className="flex items-center justify-between gap-3 text-xs">
+          <span>
+            <span className="font-semibold">Board privat</span>
+            <span className="block text-[11px] text-muted">Hanya anggota board yang dapat melihat.</span>
+          </span>
+          <Toggle checked={isPrivate} onChange={setIsPrivate} />
+        </label>
+        <button type="submit" className={`${primaryBtn} w-full`} disabled={!name.trim()}>
+          Buat board
+        </button>
+      </form>
+    </Modal>
+  );
+}
+
+function BoardSettingsModal({ board, onClose }: { board: BoardDto; onClose: () => void }) {
+  const { snapshot, run, navigate } = useWorkspace();
+  const [name, setName] = useState(board.name);
+  return (
+    <Modal open onClose={onClose} title={`Pengaturan: ${board.name}`}>
+      <div className="space-y-4">
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            run("board:update", { board_id: board.id, name }, "Board diperbarui");
+          }}
+        >
+          <input value={name} onChange={(e) => setName(e.target.value)} className={smallInputClass} />
+          <button type="submit" className={outlineBtn}>
+            Simpan
+          </button>
+        </form>
+        <label className="flex items-center justify-between gap-3 text-xs">
+          <span>
+            <span className="font-semibold">Board privat</span>
+            <span className="block text-[11px] text-muted">Jika aktif, hanya anggota board di bawah yang dapat melihat board & diskusinya.</span>
+          </span>
+          <Toggle
+            checked={board.visibility === "private"}
+            onChange={(v) => run("board:update", { board_id: board.id, visibility: v ? "private" : "workspace" })}
+          />
+        </label>
+        <div>
+          <div className="mb-2 text-xs font-bold">Anggota board</div>
+          <div className="max-h-64 space-y-1.5 overflow-y-auto">
+            {snapshot.users.map((u) => {
+              const on = board.member_ids.includes(u.id);
+              return (
+                <div key={u.id} className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-2">
+                    <Avatar name={u.name} size="sm" online={u.online} />
+                    {u.name}
+                  </span>
+                  <Toggle
+                    checked={on}
+                    disabled={u.id === board.created_by}
+                    onChange={() => run("board:toggle_member", { board_id: board.id, user_id: u.id })}
+                  />
                 </div>
               );
             })}
           </div>
-        )}
-      </section>
-    </div>
+        </div>
+        <button
+          type="button"
+          className="w-full cursor-pointer rounded-card border border-danger/30 px-3 py-2 text-xs font-semibold text-danger hover:bg-danger/10"
+          onClick={async () => {
+            if (!window.confirm(`Arsipkan board "${board.name}"?`)) return;
+            if (await run("board:delete", { board_id: board.id }, "Board diarsipkan")) {
+              onClose();
+              navigate({ boardId: "" });
+            }
+          }}
+        >
+          Arsipkan board
+        </button>
+      </div>
+    </Modal>
   );
 }
