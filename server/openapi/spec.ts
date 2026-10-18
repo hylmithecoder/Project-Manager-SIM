@@ -3,7 +3,8 @@ import { ACTION_DOCS } from "./catalog";
 import { httpPathForAction } from "./docs";
 import { COMPONENT_SCHEMAS, s } from "./schema";
 
-const INTRO = `
+/** Intro markdown; examples use the base URL the spec is served from. */
+const introFor = (baseUrl: string) => `
 API untuk **Project Manager Workspace** (task board + chat grup terintegrasi). Ditujukan untuk klien mobile (Expo / React Native) dan web.
 
 ## Dua cara memanggil API
@@ -55,7 +56,7 @@ dengan status **400** (validasi), **401** (belum login / token kedaluwarsa), **4
 ### Contoh Expo
 
 \`\`\`ts
-const BASE = "https://projectmanager.edge.autosmartparking.com";
+const BASE = "${baseUrl}";
 const ws = new WebSocket(BASE.replace(/^http/, "ws") + "/ws");
 const pending = new Map<string, (msg: any) => void>();
 const call = (action: string, payload = {}) => new Promise<any>((resolve, reject) => {
@@ -192,7 +193,7 @@ export function buildOpenApiSpec(serverUrl: string) {
     info: {
       title: "Project Manager Workspace API",
       version: "1.0.0",
-      description: INTRO.trim(),
+      description: introFor(serverUrl).trim(),
     },
     servers: [{ url: serverUrl, description: "Server ini" }],
     security: [{ bearerAuth: [] }],

@@ -209,7 +209,7 @@ export async function smtpTestSend(ctx: ActionContext, payload: Record<string, u
   if (!isValidEmail(to)) throw new Error("Alamat email tujuan tidak valid");
   const res = await sendEmail({
     to,
-    subject: "Tes pengiriman email — Auto Smart Workspace",
+    subject: "Tes pengiriman email — Project Manager",
     html: renderLayout({
       badge: "Tes SMTP",
       tone: "success",

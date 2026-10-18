@@ -19,8 +19,8 @@ import { buildOpenApiSpec } from "../openapi/spec";
 describe("WebSocket URL + dev proxy contract", () => {
   test("browser always connects to same-origin /ws (wss on https)", () => {
     expect(
-      resolveWsUrl({ protocol: "https:", host: "projectmanager.edge.autosmartparking.com", search: "" }),
-    ).toBe("wss://projectmanager.edge.autosmartparking.com/ws");
+      resolveWsUrl({ protocol: "https:", host: "projectmanager.edge.ilmeee.com", search: "" }),
+    ).toBe("wss://projectmanager.edge.ilmeee.com/ws");
     expect(resolveWsUrl({ protocol: "http:", host: "localhost:3000", search: "" })).toBe(
       "ws://localhost:3000/ws",
     );
@@ -164,5 +164,12 @@ describe("OpenAPI spec", () => {
     expect(refs.length).toBeGreaterThan(50);
     const components = spec.components as unknown as Record<string, Record<string, unknown>>;
     for (const [, kind, name] of refs) expect(components[kind][name]).toBeDefined();
+  });
+});
+
+describe("OpenAPI intro", () => {
+  test("Expo example uses the server base URL", () => {
+    const spec = buildOpenApiSpec("https://pm.example.test");
+    expect(spec.info.description).toContain('const BASE = "https://pm.example.test";');
   });
 });

@@ -166,7 +166,7 @@ describe("Task Board + Chat backend: auth, roles, privacy, notifications", () =>
 
     const c = await connect();
     const { token } = await c.ok<{ token: string }>("auth:login", {
-      email: "hylmi@autosmartparking.com",
+      email: "hylmi@gmail.com",
       password: "password123",
     });
     const snap = await fetch(`${httpBaseUrl}/api/snapshot`, { headers: { Authorization: `Bearer ${token}` } });
@@ -185,17 +185,17 @@ describe("Task Board + Chat backend: auth, roles, privacy, notifications", () =>
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/login/i);
 
-    const bad = await c.request("auth:login", { email: "hylmi@autosmartparking.com", password: "wrong" });
+    const bad = await c.request("auth:login", { email: "hylmi@gmail.com", password: "wrong" });
     expect(bad.ok).toBe(false);
   });
 
   test("login + resume bind the socket and return a snapshot scoped to the member", async () => {
     const c = await connect();
     const { token } = await c.ok<{ token: string }>("auth:login", {
-      email: "raka@autosmartparking.com",
+      email: "raka@gmail.com",
       password: "password123",
     });
-    expect(c.snapshot?.me.email).toBe("raka@autosmartparking.com");
+    expect(c.snapshot?.me.email).toBe("raka@gmail.com");
     expect(c.snapshot?.workspaces[0].my_role).toBe("member");
     expect(c.snapshot?.dev).toBeUndefined();
 
@@ -229,7 +229,7 @@ describe("Task Board + Chat backend: auth, roles, privacy, notifications", () =>
     }
 
     // Regular users can not use the developer console.
-    const owner = await loginAs("hylmi@autosmartparking.com", "password123");
+    const owner = await loginAs("hylmi@gmail.com", "password123");
     expect((await owner.request("dev:create_workspace", { name: "X", admin_email: "a@b.test" })).ok).toBe(false);
   });
 
@@ -375,7 +375,7 @@ describe("Task Board + Chat backend: auth, roles, privacy, notifications", () =>
     expect(owner.snapshot!.messages.some((m) => m.room_id === boardRoom.id && m.type === "task_event")).toBe(true);
 
     // Users of another company can not touch this workspace.
-    const outsider = await loginAs("raka@autosmartparking.com", "password123");
+    const outsider = await loginAs("raka@gmail.com", "password123");
     expect(outsider.snapshot!.workspaces.some((w) => w.id === wsId)).toBe(false);
     expect((await outsider.request("message:send", { room_id: boardRoom.id, content: "intip" })).ok).toBe(false);
     expect((await outsider.request("card:update", { card_id: card.id, title: "hack" })).ok).toBe(false);
@@ -487,9 +487,9 @@ describe("Task Board + Chat backend: auth, roles, privacy, notifications", () =>
     expect((await post("/api/v1/card/create", { list_id: SEED_IDS.lists.todo, title: "x" })).status).toBe(401);
     expect((await post("/api/v1/card/unknown", {})).status).toBe(404);
     expect((await fetch(`${httpBaseUrl}/api/v1/auth/login`)).status).toBe(405);
-    expect((await post("/api/v1/auth/login", { email: "raka@autosmartparking.com", password: "salah" })).status).toBe(400);
+    expect((await post("/api/v1/auth/login", { email: "raka@gmail.com", password: "salah" })).status).toBe(400);
 
-    const login = (await (await post("/api/v1/auth/login", { email: "raka@autosmartparking.com", password: "password123" })).json()) as {
+    const login = (await (await post("/api/v1/auth/login", { email: "raka@gmail.com", password: "password123" })).json()) as {
       ok: boolean;
       data: { token: string };
     };
@@ -501,7 +501,7 @@ describe("Task Board + Chat backend: auth, roles, privacy, notifications", () =>
 
     // Member (raka) may not invite -> 403; WebSocket clients receive HTTP-made changes in realtime.
     expect((await post("/api/v1/workspace/invite_member", { email: "a@b.test" }, auth)).status).toBe(403);
-    const watcher = await loginAs("hylmi@autosmartparking.com", "password123");
+    const watcher = await loginAs("hylmi@gmail.com", "password123");
     const before = watcher.events.length;
     const sent = await post("/api/v1/message/send", { room_id: SEED_IDS.rooms.groupRoom, content: "Halo dari Expo" }, auth);
     expect(sent.status).toBe(200);

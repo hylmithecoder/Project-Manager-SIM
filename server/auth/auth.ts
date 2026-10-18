@@ -226,7 +226,7 @@ export async function ensureDeveloperAccount(
   sql: BunSqlClient,
 ): Promise<{ created: boolean; email: string }> {
   const email = normalizeEmail(
-    process.env.DEV_ACCOUNT_EMAIL || "developer@autosmartparking.com",
+    process.env.DEV_ACCOUNT_EMAIL || "developer@gmail.com",
   );
   const existing = await sql<{ id: string }>`
     SELECT id FROM users WHERE platform_role = 'developer' LIMIT 1

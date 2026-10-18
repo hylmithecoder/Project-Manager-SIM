@@ -73,9 +73,9 @@ export async function seedDatabase(
     await tx`
       INSERT INTO users (id, name, email, phone, password_hash, avatar_url, last_seen_at)
       VALUES
-        (${SEED_IDS.users.hylmi}, 'Hylmi Mahdi', 'hylmi@autosmartparking.com', '+6281234567801', ${defaultPassHash}, null, now()),
-        (${SEED_IDS.users.nadia}, 'Nadia Putri', 'nadia@autosmartparking.com', '+6281234567802', ${defaultPassHash}, null, now()),
-        (${SEED_IDS.users.raka}, 'Raka Pratama', 'raka@autosmartparking.com', '+6281234567803', ${defaultPassHash}, null, now())
+        (${SEED_IDS.users.hylmi}, 'Hylmi Mahdi', 'hylmi@gmail.com', '+6281234567801', ${defaultPassHash}, null, now()),
+        (${SEED_IDS.users.nadia}, 'Nadia Putri', 'nadia@gmail.com', '+6281234567802', ${defaultPassHash}, null, now()),
+        (${SEED_IDS.users.raka}, 'Raka Pratama', 'raka@gmail.com', '+6281234567803', ${defaultPassHash}, null, now())
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         email = EXCLUDED.email,
@@ -87,8 +87,8 @@ export async function seedDatabase(
       INSERT INTO workspaces (id, name, slug, owner_id)
       VALUES (
         ${SEED_IDS.workspace},
-        'Auto Smart Workspace',
-        'auto-smart-workspace',
+        'Project Manager',
+        'project-manager',
         ${SEED_IDS.users.hylmi}
       )
       ON CONFLICT (id) DO UPDATE SET

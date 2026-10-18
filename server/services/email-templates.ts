@@ -61,14 +61,14 @@ export function renderLayout(p: LayoutParams): string {
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="margin:0;padding:24px;background:#eef1f7;font-family:'Plus Jakarta Sans',Arial,sans-serif;color:#1b2440">
 <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #dce3ee;border-radius:20px;padding:30px">
-<div style="font-size:12px;font-weight:800;color:#3b63d6;letter-spacing:.08em">AUTO SMART WORKSPACE</div>
+<div style="font-size:12px;font-weight:800;color:#3b63d6;letter-spacing:.08em">PROJECT MANAGER WORKSPACE</div>
 <div style="display:inline-block;margin-top:14px;background:${tone.bg};color:${tone.fg};font-size:11px;font-weight:700;padding:5px 12px;border-radius:9999px;text-transform:uppercase;letter-spacing:.08em">${escapeHtml(p.badge)}</div>
 <h1 style="font-size:21px;line-height:1.35;margin:14px 0 8px;color:#1b2440">${escapeHtml(p.headline)}</h1>
 <div style="font-size:14px;line-height:1.65;color:#6b7488">${p.bodyHtml}</div>
 ${quote}
 ${details ? `<table style="width:100%;border-collapse:collapse;margin-top:12px;border-top:1px solid #eef1f7">${details}</table>` : ""}
 ${cta}
-<div style="margin-top:28px;border-top:1px solid #dce3ee;padding-top:14px;font-size:11px;color:#9aa3b5;line-height:1.6">${escapeHtml(p.footerNote || "Email ini dikirim otomatis oleh Auto Smart Workspace. Atur notifikasi email Anda di menu Pengaturan.")}</div>
+<div style="margin-top:28px;border-top:1px solid #dce3ee;padding-top:14px;font-size:11px;color:#9aa3b5;line-height:1.6">${escapeHtml(p.footerNote || "Email ini dikirim otomatis oleh Project Manager Workspace. Atur notifikasi email Anda di menu Pengaturan.")}</div>
 </div>
 </body>
 </html>`;

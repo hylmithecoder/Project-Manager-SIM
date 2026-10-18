@@ -32,7 +32,7 @@ export function getSmtpConfig(): SmtpConfig {
   const rawPass = process.env.SMTP_PASSWORD || "";
   // Strip surrounding quotes if present in .env
   const pass = rawPass.replace(/^["']|["']$/g, "");
-  const from = process.env.SMTP_FROM || user || "Auto Smart Workspace";
+  const from = process.env.SMTP_FROM || user || "Project Manager Workspace";
   const enabled = process.env.SMTP_ENABLED !== "false";
 
   return { host, port, user, pass, from, enabled };
