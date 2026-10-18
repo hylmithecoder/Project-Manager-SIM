@@ -88,7 +88,15 @@ export interface WsResponseMessage<T = unknown> {
   error?: string;
 }
 
-export type WsEventName = WsAction | "presence" | "session:revoked";
+export type WsEventName = WsAction | "presence" | "session:revoked" | "notification:browser";
+
+export interface BrowserNotificationDto {
+  id: string;
+  title: string;
+  body: string;
+  /** Relative, same-origin deep link. */
+  url: string;
+}
 
 export interface WsBroadcastEvent<T = unknown> {
   type: "event";

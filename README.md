@@ -61,3 +61,37 @@ Every workspace activity (cards, checklists, lists, boards, members, rooms, dead
 (tagged or not) is emailed with its own template. Users choose in **Pengaturan**: email semua pesan chat,
 email saat di-tag, email aktivitas. Owners/admins can switch chat/activity email off for the whole workspace
 in **Kelola Workspace**. Rooms can be muted.
+
+## Browser notifications
+
+After signing in, the app requests notification permission automatically once per account/tab session.
+If the browser requires a user gesture, an **Izinkan notifikasi browser** dialog offers a direct
+**Izinkan notifikasi** button. Previously granted browser permission enables notifications for a new
+account automatically. Choosing **Nanti saja** dismisses onboarding for that tab session; an explicit
+disable in Settings remains disabled across sign-ins. Blocked permission shows site-setting recovery.
+You can also open **Pengaturan → Notifikasi Browser → Aktifkan**, then allow the browser permission prompt.
+Use **Kirim Notifikasi Uji** to check delivery. Requires HTTPS (or localhost), browser support,
+site storage, and permission in both browser and operating-system notification settings.
+If permission is blocked, allow Notifications in the browser's site settings and return to the page.
+The preference is stored per account in this browser; email preferences and workspace email switches
+do not disable browser notifications.
+
+All activities handled by the existing activity notification pipeline (boards, lists, cards,
+checklists, attachments, assignments, deadlines, members, workspace settings and room permissions),
+plus new chat messages/mentions, send a live `notification:browser` event over authenticated `/ws`.
+Payload: `{ id, title, body, url }`, where `url` is a relative workspace/card/room deep link.
+Only authorized recipients receive it, including members currently viewing another workspace.
+Private board membership and chat room membership are respected. Actors do not notify themselves
+(except due-soon reminders). Muted rooms suppress ordinary messages; mentions still notify.
+Failed actions do not deliver their collected browser events. Login, read receipts, presence,
+initial snapshots, reconnects, and historical data do not generate browser alerts.
+
+Keep an app tab open and connected, including in the background. These are live notifications:
+closed tabs, suspended browsers, and disconnected clients do not receive/replay them; background
+Web Push delivery is not configured. Multiple tabs coordinate using Web Locks and a bounded
+shared event-ID cache; browsers without Web Locks use best-effort cache deduplication.
+Clicking an alert focuses/opens the linked workspace page. `/notifications-sw.js` is served by
+Next.js on `:3000` during development and included in the static export/embedded Bun binary on
+`:5790`; it handles notification display/clicks only and does not cache API responses.
+No new API route, port, proxy rewrite, database migration, SMTP or VAPID configuration is required.
+Rebuild the binary with `make build` to include the updated UI and service worker.

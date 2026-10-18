@@ -16,6 +16,8 @@ const devOrigins = (process.env.ALLOWED_DEV_ORIGINS || "")
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: [
+    "projectmanager.edge.autosmartparking.com",
+    "*.autosmartparking.com",
     ...devOrigins,
   ],
   ...(isStaticExport

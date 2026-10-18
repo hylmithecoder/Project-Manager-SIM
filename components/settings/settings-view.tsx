@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { BellIcon, LockIcon, MailIcon, UserIcon } from "@/components/icons";
 import { Toggle, cardClass, inputClass, primaryBtn, useWorkspace } from "@/components/ui/kit";
+import { BrowserNotificationSettings } from "./browser-notification-settings";
 
 /** Profile, password and per-user email notification preferences. */
 export function SettingsView() {
@@ -40,6 +41,9 @@ export function SettingsView() {
 
   return (
     <div className="grid gap-5 lg:grid-cols-2">
+      <div className="lg:col-span-2">
+        <BrowserNotificationSettings userId={me.id} />
+      </div>
       <div className={`${cardClass} space-y-4 lg:row-span-2`}>
         <div className="flex items-center gap-2">
           <BellIcon className="h-4 w-4 text-primary" />

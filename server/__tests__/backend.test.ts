@@ -8,9 +8,11 @@ import { SCHEMA_TABLES, SUPPORT_TABLES, migrateSchema } from "../database/scheme
 import { SEED_IDS, seedDatabase } from "../database/seeder";
 import { startServer, type WsClientData } from "../index";
 import { flushEmailQueue, setMailTransport } from "../services/mailer";
+import { collectBrowserNotifications } from "../services/browser-notifications";
 import type { SendEmailOptions } from "../services/smtp";
 import type {
   WorkspaceSnapshot,
+  BrowserNotificationDto,
   WsAction,
   WsBroadcastEvent,
   WsResponseMessage,
@@ -393,11 +395,117 @@ describe("Task Board + Chat backend: auth, roles, privacy, notifications", () =>
     // Due-soon reminders are emailed once to the assignee.
     const { scanDueSoon } = await import("../services/notify");
     await drainOutbox();
-    await scanDueSoon(sql, "https://pm.example.test");
-    await scanDueSoon(sql, "https://pm.example.test");
+    const firstScan = await collectBrowserNotifications(() => scanDueSoon(sql, "https://pm.example.test"));
+    const secondScan = await collectBrowserNotifications(() => scanDueSoon(sql, "https://pm.example.test"));
+    expect(firstScan.notifications).toHaveLength(1);
+    expect(firstScan.notifications[0].userIds).toEqual([staffId]);
+    expect(firstScan.notifications[0].notification.title).toContain("Pengingat");
+    expect(secondScan.notifications).toHaveLength(0);
     mails = (await drainOutbox()).filter((m) => m.subject.includes("Pengingat"));
     expect(mails).toHaveLength(1);
     expect(mails[0].to).toBe("staff@majujaya.test");
+  }, 30000);
+
+  test("browser alerts respect privacy, mute and sessions independently of email preferences", async () => {
+    const owner = await loginAs("hylmi@gmail.com", "password123");
+    const member = await loginAs("raka@gmail.com", "password123");
+    const otherTab = await loginAs("raka@gmail.com", "password123");
+    const outsider = await loginAs("boss@majujaya.test", "rahasia-kuat");
+    const anonymous = await connect();
+    const developer = await loginAs("developer@test.local", "developer-secret");
+    const alerts = (client: TestClient) => client.events.filter((e) => e.event === "notification:browser").map((e) => e.data as BrowserNotificationDto);
+    const waitForAlerts = async (client: TestClient) => {
+      const deadline = Date.now() + 3000;
+      while (!alerts(client).length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(alerts(client).length).toBeGreaterThan(0);
+    };
+    const clear = () => { for (const c of [owner, member, otherTab, outsider, anonymous, developer]) c.events.length = 0; };
+    await member.ok("account:update_preferences", { notify_chat_email: false, notify_activity_email: false });
+    await owner.ok("workspace:update_settings", {
+      workspace_id: SEED_IDS.workspace, email_activity_enabled: false, email_chat_enabled: false,
+    });
+    clear();
+    const board = await owner.ok<{ id: string }>("board:create", { name: "Browser Alerts", workspace_id: SEED_IDS.workspace });
+    await waitForAlerts(member);
+    await waitForAlerts(otherTab);
+    expect(alerts(member)).toHaveLength(1);
+    expect(alerts(member)[0].title).toContain("Browser Alerts");
+    expect(alerts(member)[0].url).toContain(`board=${board.id}`);
+    expect(alerts(otherTab)[0].id).toBe(alerts(member)[0].id);
+    for (const c of [owner, outsider, anonymous, developer]) expect(alerts(c)).toHaveLength(0);
+
+    clear();
+    const secret = await owner.ok<{ id: string }>("board:create", { name: "Secret Alert", visibility: "private" });
+    expect(alerts(member)).toHaveLength(0);
+    expect((await member.request("list:create", { board_id: secret.id, name: "Denied" })).ok).toBe(false);
+    expect(alerts(owner)).toHaveLength(0);
+
+    clear();
+    await owner.ok("message:send", { room_id: SEED_IDS.rooms.groupRoom, content: "Browser chat without email" });
+    await waitForAlerts(member);
+    expect(alerts(member)).toHaveLength(1);
+    expect(alerts(member)[0].body).toContain("Browser chat without email");
+    expect(alerts(member)[0].url).toContain(`room=${SEED_IDS.rooms.groupRoom}`);
+    await member.ok("room:mute", { room_id: SEED_IDS.rooms.groupRoom, minutes: 30 });
+    clear();
+    await owner.ok("message:send", { room_id: SEED_IDS.rooms.groupRoom, content: "Muted ordinary message" });
+    expect(alerts(member)).toHaveLength(0);
+    const mention = await owner.ok<{ mention_ids: string[] }>("message:send", { room_id: SEED_IDS.rooms.groupRoom, content: "Please @Raka check" });
+    expect(mention.mention_ids).toContain(SEED_IDS.users.raka);
+    await waitForAlerts(member);
+    expect(alerts(member)).toHaveLength(1);
+    expect(alerts(member)[0].title).toContain("Anda disebut");
+
+    await member.ok("auth:logout");
+    clear();
+    await owner.ok("message:send", { room_id: SEED_IDS.rooms.groupRoom, content: "@Raka after logout" });
+    await waitForAlerts(otherTab);
+    expect(alerts(member)).toHaveLength(0);
+    expect(alerts(otherTab)).toHaveLength(1);
+    const reconnected = await loginAs("raka@gmail.com", "password123");
+    expect(alerts(reconnected)).toHaveLength(0);
+    await reconnected.ok("room:mute", { room_id: SEED_IDS.rooms.groupRoom, minutes: 0 });
+    await reconnected.ok("account:update_preferences", { notify_chat_email: true, notify_activity_email: true });
+    await owner.ok("workspace:update_settings", {
+      workspace_id: SEED_IDS.workspace, email_activity_enabled: true, email_chat_enabled: true,
+    });
+    await drainOutbox();
+  }, 30000);
+
+  test("ordinary chat in groups, boards and direct rooms sends browser alerts without requiring mentions", async () => {
+    const sender = await loginAs("hylmi@gmail.com", "password123");
+    const recipient = await loginAs("raka@gmail.com", "password123");
+    const nonParticipant = await loginAs("nadia@gmail.com", "password123");
+    const direct = await sender.ok<{ room_id: string }>("room:open_direct", { user_id: SEED_IDS.users.raka });
+    const privateGroup = await sender.ok<{ id: string }>("room:create", {
+      name: "Chat browser regression", member_ids: [SEED_IDS.users.raka],
+    });
+    await recipient.ok("account:update_preferences", { notify_chat_email: false, notify_mention_email: false });
+    try {
+      for (const [kind, roomId] of [
+        ["group", SEED_IDS.rooms.groupRoom], ["board", SEED_IDS.rooms.boardRoom],
+        ["direct", direct.room_id], ["private-group", privateGroup.id],
+      ]) {
+        const content = `Ordinary ${kind} chat ${crypto.randomUUID()}`;
+        const sent = await sender.ok<{ mention_ids: string[] }>("message:send", { room_id: roomId, content });
+        expect(sent.mention_ids).toHaveLength(0);
+        const matching = (client: TestClient) => client.events
+          .filter((event) => event.event === "notification:browser")
+          .map((event) => event.data as BrowserNotificationDto)
+          .filter((alert) => alert.body.includes(content));
+        const deadline = Date.now() + 3000;
+        while (!matching(recipient).length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+        expect(matching(recipient)).toHaveLength(1);
+        expect(matching(recipient)[0].title).toContain("Pesan baru");
+        expect(matching(recipient)[0].url).toContain(`room=${roomId}`);
+        expect(matching(recipient)[0].url).toContain("tab=chat");
+        expect(matching(sender)).toHaveLength(0);
+        if (kind === "direct" || kind === "private-group") expect(matching(nonParticipant)).toHaveLength(0);
+      }
+    } finally {
+      await recipient.ok("account:update_preferences", { notify_chat_email: true, notify_mention_email: true });
+      await drainOutbox();
+    }
   }, 30000);
 
   test("password reset by email and developer account deactivation", async () => {
@@ -508,6 +616,8 @@ describe("Task Board + Chat backend: auth, roles, privacy, notifications", () =>
     await new Promise((r) => setTimeout(r, 150));
     expect(watcher.events.length).toBeGreaterThan(before);
     expect(watcher.snapshot!.messages.some((m) => m.content === "Halo dari Expo")).toBe(true);
+    const browserAlert = watcher.events.find((e) => e.event === "notification:browser" && (e.data as BrowserNotificationDto).body.includes("Halo dari Expo"));
+    expect(browserAlert).toBeDefined();
 
     expect((await post("/api/v1/auth/logout", {}, auth)).status).toBe(200);
     expect((await post("/api/v1/state/init", {}, auth)).status).toBe(401);

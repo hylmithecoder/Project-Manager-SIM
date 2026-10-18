@@ -9,6 +9,7 @@ import type {
   WsResponseMessage,
 } from "@/server/ws/protocol";
 import { resolveWsUrl } from "./ws-url";
+import { showBrowserNotification } from "./browser-notifications";
 
 const TOKEN_KEY = "pm_session_token";
 const WORKSPACE_KEY = "pm_active_workspace";
@@ -45,6 +46,7 @@ export function useWorkspaceSocket() {
   const [lastEvent, setLastEvent] = useState<WsBroadcastEvent | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pending = useRef(new Map<string, Pending>());
+  const notificationUser = useRef<string | null>(null);
 
   const rawRequest = useCallback(
     <T,>(action: WsAction, payload: Record<string, unknown> = {}): Promise<T> => {
@@ -82,6 +84,7 @@ export function useWorkspaceSocket() {
         setAuthState("authenticated");
       }
       if (action === "auth:logout") {
+        notificationUser.current = null;
         storeSession(null);
         localStorage.removeItem(WORKSPACE_KEY);
         setSnapshot(null);
@@ -115,6 +118,7 @@ export function useWorkspaceSocket() {
         setAuthState("authenticated");
       } catch {
         localStorage.removeItem(TOKEN_KEY);
+        notificationUser.current = null;
         setSnapshot(null);
         setAuthState("anonymous");
       }
@@ -148,12 +152,24 @@ export function useWorkspaceSocket() {
           return;
         }
         if (msg.event === "session:revoked") {
+          notificationUser.current = null;
           localStorage.removeItem(TOKEN_KEY);
           setSnapshot(null);
           setAuthState("anonymous");
           return;
         }
-        if (msg.snapshot) setSnapshot(msg.snapshot);
+        if (msg.snapshot) {
+          notificationUser.current = msg.snapshot.me.id;
+          setSnapshot(msg.snapshot);
+        }
+        if (msg.event === "notification:browser") {
+          const userId = notificationUser.current;
+          if (userId) {
+            void showBrowserNotification(userId, msg.data, () => notificationUser.current === userId)
+              .catch((error) => console.warn("[browser-notification]", error));
+          }
+          return;
+        }
         setLastEvent(msg);
       };
 
@@ -176,6 +192,7 @@ export function useWorkspaceSocket() {
     connect();
     return () => {
       unmounted = true;
+      notificationUser.current = null;
       if (timer) clearTimeout(timer);
       wsRef.current?.close();
     };

@@ -13,6 +13,7 @@ import { SettingsView } from "@/components/settings/settings-view";
 import { WorkspaceProvider, outlineBtn, type NavState } from "@/components/ui/kit";
 import { UserDashboard } from "@/components/user-dashboard";
 import { useWorkspaceSocket } from "@/lib/use-workspace-socket";
+import { BrowserNotificationOnboarding } from "@/components/browser-notification-onboarding";
 
 const TABS: NavState["tab"][] = ["kanban", "chat", "user", "admin", "settings"];
 const noopSubscribe = () => () => {};
@@ -111,6 +112,7 @@ export function BoardChatWorkspace() {
   if (!snapshot.active_workspace_id) {
     return (
       <WorkspaceProvider value={providerValue}>
+        {authState === "authenticated" && <BrowserNotificationOnboarding key={snapshot.me.id} userId={snapshot.me.id} />}
         <div className="min-h-dvh space-y-5 bg-floor p-4 font-sans text-ink md:p-8">
           <div className="mx-auto max-w-3xl space-y-4">
             <div className="flex items-center justify-between rounded-card border border-line bg-bg p-5 shadow-soft">
@@ -137,6 +139,7 @@ export function BoardChatWorkspace() {
 
   return (
     <WorkspaceProvider value={providerValue}>
+      {authState === "authenticated" && <BrowserNotificationOnboarding key={snapshot.me.id} userId={snapshot.me.id} />}
       <AppLayout connected={connected} onLogout={logout}>
         {tab === "kanban" && <KanbanBoardView />}
         {tab === "chat" && <ChatRoomView />}

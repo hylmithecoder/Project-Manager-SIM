@@ -6,6 +6,7 @@ import { migrateSchema } from "./database/scheme";
 import { seedDatabase } from "./database/seeder";
 import { EMBEDDED_ASSETS } from "./embedded-assets";
 import { scanDueSoon } from "./services/notify";
+import { collectBrowserNotifications, type BrowserNotificationDelivery } from "./services/browser-notifications";
 import { resolveUploadPath } from "./services/uploads";
 import { buildOpenApiSpec } from "./openapi/spec";
 import { actionFromHttpPath, renderDocsHtml } from "./openapi/docs";
@@ -184,6 +185,19 @@ export async function startServer(options?: {
   };
   let allowedOrigins = getAllowedOrigins(port);
 
+  function deliverBrowserNotifications(notifications: BrowserNotificationDelivery[]) {
+    for (const { userIds, notification } of notifications) {
+      const recipients = new Set(userIds);
+      for (const client of clients) {
+        if (!client.data.user || !recipients.has(client.data.user.id)) continue;
+        send(client, {
+          type: "event", event: "notification:browser", data: notification,
+          timestamp: new Date().toISOString(),
+        } satisfies WsBroadcastEvent);
+      }
+    }
+  }
+
   async function pushSnapshot(
     ws: Client,
     event: WsAction | "presence",
@@ -309,7 +323,8 @@ export async function startServer(options?: {
       onlineUserIds: onlineUserIds(),
     };
     try {
-      const res = await handleWsAction(ctx, action, payload);
+      const { result: res, notifications } = await collectBrowserNotifications(() => handleWsAction(ctx, action, payload));
+      deliverBrowserNotifications(notifications);
       await applySideEffects(null, action, res);
       return json(200, { ok: true, action, data: res.result });
     } catch (err) {
@@ -458,7 +473,7 @@ export async function startServer(options?: {
         };
 
         try {
-          const res = await handleWsAction(ctx, action, parsed.payload || {});
+          const { result: res, notifications } = await collectBrowserNotifications(() => handleWsAction(ctx, action, parsed.payload || {}));
 
           if (res.auth && "logout" in res.auth) {
             ws.data.user = null;
@@ -471,6 +486,7 @@ export async function startServer(options?: {
           if (res.selectWorkspaceId !== undefined) ws.data.workspaceId = res.selectWorkspaceId;
 
           send(ws, { id: reqId, type: "response", ok: true, action, data: res.result } satisfies WsResponseMessage);
+          deliverBrowserNotifications(notifications);
           await applySideEffects(ws, action, res);
 
           const nowOnline = ws.data.user?.id ?? null;
@@ -506,7 +522,8 @@ export async function startServer(options?: {
   if (dueSoonInterval > 0) {
     const timer = setInterval(async () => {
       try {
-        const workspaces = await scanDueSoon(sql, allowedOrigins[0]);
+        const { result: workspaces, notifications } = await collectBrowserNotifications(() => scanDueSoon(sql, allowedOrigins[0]));
+        deliverBrowserNotifications(notifications);
         if (workspaces.length) await broadcast(null, "presence", null, { workspaceIds: workspaces });
       } catch (err) {
         console.error("[due-soon] scan failed:", err);

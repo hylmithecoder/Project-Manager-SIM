@@ -1,6 +1,7 @@
 import type { BunSqlClient } from "../bun-env";
 import { activityEmail, chatMessageEmail } from "./email-templates";
 import { enqueueEmail } from "./mailer";
+import { queueBrowserNotification } from "./browser-notifications";
 
 export interface ActivityEvent {
   workspaceId: string;
@@ -95,7 +96,7 @@ export async function notifyActivity(
   const [ws] = await sql<{ name: string; email_activity_enabled: boolean }>`
     SELECT name, email_activity_enabled FROM workspaces WHERE id = ${ev.workspaceId}
   `;
-  if (!ws || !ws.email_activity_enabled) return 0;
+  if (!ws) return 0;
 
   const [board] = ev.boardId
     ? await sql<{ name: string; visibility: string }>`
@@ -138,7 +139,6 @@ export async function notifyActivity(
   let sent = 0;
   for (const r of recipients) {
     if (!opts.includeActor && r.id === ev.actorId) continue;
-    if (!r.notify_activity_email) continue;
     const mail = activityEmail({
       action: ev.action,
       actorName: actor?.name || "Seseorang",
@@ -149,6 +149,12 @@ export async function notifyActivity(
       payload: ev.payload || {},
       url,
     });
+    queueBrowserNotification([r.id], {
+      title: mail.subject,
+      body: ev.eventText || [actor?.name || "Seseorang", board?.name, card?.title].filter(Boolean).join(" · "),
+      url: deepLink("", { workspace: ev.workspaceId, board: ev.boardId, card: ev.cardId }),
+    });
+    if (!ws.email_activity_enabled || !r.notify_activity_email) continue;
     enqueueEmail({ to: r.email, subject: mail.subject, html: mail.html });
     sent += 1;
   }
@@ -222,6 +228,14 @@ export async function notifyChatMessage(
   const content =
     msg.type === "text" ? msg.content || "" : `[${msg.type === "image" ? "Gambar" : "File"}] ${msg.content || ""}`;
   for (const m of members) {
+    // Mentions bypass room mute, matching the existing in-app/email policy.
+    if (!m.muted || m.mentioned) {
+      queueBrowserNotification([m.id], {
+        title: `[${msg.workspace_name}] ${m.mentioned ? "Anda disebut" : "Pesan baru"} · ${isDirect ? msg.sender_name : msg.room_name || "chat"}`,
+        body: `${msg.sender_name}: ${content}`.slice(0, 240),
+        url: deepLink("", { workspace: msg.workspace_id, room: msg.room_id, tab: "chat" }),
+      });
+    }
     const shouldEmail = m.mentioned
       ? m.notify_mention_email
       : msg.email_chat_enabled && m.notify_chat_email && !m.muted;
