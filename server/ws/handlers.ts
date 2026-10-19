@@ -1,4 +1,5 @@
 import * as auth from "./actions/auth";
+import * as googleAuth from "./actions/google-auth";
 import * as board from "./actions/board";
 import * as chat from "./actions/chat";
 import * as dev from "./actions/developer";
@@ -13,6 +14,9 @@ type Handler = (ctx: ActionContext, payload: Record<string, unknown>) => Promise
 /** Actions an unauthenticated socket may call (login & account recovery). */
 export const PUBLIC_ACTIONS: ReadonlySet<WsAction> = new Set<WsAction>([
   "auth:login",
+  "auth:google_config",
+  "auth:google_start",
+  "auth:google_verify",
   "auth:resume",
   "invite:lookup",
   "invite:accept",
@@ -22,6 +26,9 @@ export const PUBLIC_ACTIONS: ReadonlySet<WsAction> = new Set<WsAction>([
 
 export const ACTION_HANDLERS: Record<WsAction, Handler> = {
   "auth:login": auth.login,
+  "auth:google_config": () => googleAuth.googleConfig(),
+  "auth:google_start": googleAuth.startGoogleLogin,
+  "auth:google_verify": googleAuth.verifyGoogleLogin,
   "auth:resume": auth.resume,
   "auth:logout": (ctx) => auth.logout(ctx),
   "invite:lookup": auth.lookupToken,

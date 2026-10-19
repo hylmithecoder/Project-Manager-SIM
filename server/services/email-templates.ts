@@ -92,6 +92,19 @@ export function roleLabel(role: string | null | undefined): string {
 // Account lifecycle
 // ---------------------------------------------------------------------------
 
+export function googleLoginOtpEmail(name: string, code: string): RenderedEmail {
+  return {
+    subject: "Kode OTP login Google — Project Manager",
+    html: renderLayout({
+      badge: "Verifikasi Login", headline: "Kode OTP login Google",
+      bodyHtml: p(`Hai ${b(name)}, masukkan kode berikut untuk menyelesaikan login dengan Google.`),
+      quote: code,
+      details: [["Berlaku", "5 menit"], ["Penggunaan", "Sekali pakai"]],
+      footerNote: "Jangan bagikan kode ini kepada siapa pun. Jika Anda tidak mencoba login, abaikan email ini.",
+    }),
+  };
+}
+
 export function invitationEmail(x: {
   inviterName: string;
   workspaceName: string;

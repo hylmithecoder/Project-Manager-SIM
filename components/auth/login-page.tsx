@@ -5,6 +5,7 @@ import { MailIcon, UserIcon } from "@/components/icons";
 import { inputClass, primaryBtn } from "@/components/ui/kit";
 import type { RequestFn } from "@/lib/use-workspace-socket";
 import { AuthShell, Field, FormError, FormNotice } from "./auth-shell";
+import { GoogleLogin } from "./google-login";
 
 export function LoginPage({ request, connected }: { request: RequestFn; connected: boolean }) {
   const [mode, setMode] = useState<"login" | "forgot">("login");
@@ -13,6 +14,7 @@ export function LoginPage({ request, connected }: { request: RequestFn; connecte
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [googleFlow, setGoogleFlow] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,12 +43,14 @@ export function LoginPage({ request, connected }: { request: RequestFn; connecte
       title={mode === "login" ? "Masuk ke Workspace" : "Lupa Password"}
       subtitle={
         mode === "login"
-          ? "Gunakan email dan password akun Anda."
+          ? "Masuk dengan Google dan OTP email, atau gunakan email dan password akun Anda."
           : "Kami akan mengirim tautan atur ulang password ke email Anda."
       }
       footer="Belum punya akun? Akun dibuat lewat undangan email dari admin perusahaan Anda."
     >
-      <form onSubmit={submit} className="space-y-4">
+      {mode === "login" && <GoogleLogin request={request} connected={connected} onFlowChange={setGoogleFlow} />}
+      {!googleFlow && <form onSubmit={submit} className="space-y-4">
+        {mode === "login" && <p className="text-center text-[11px] text-muted">atau masuk dengan password</p>}
         <FormError message={error} />
         <FormNotice message={notice} />
         <Field label="Alamat Email">
@@ -91,7 +95,7 @@ export function LoginPage({ request, connected }: { request: RequestFn; connecte
         >
           {mode === "login" ? "Lupa password?" : "Kembali ke halaman masuk"}
         </button>
-      </form>
+      </form>}
     </AuthShell>
   );
 }

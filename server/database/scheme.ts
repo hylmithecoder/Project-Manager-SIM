@@ -27,7 +27,7 @@ export const SCHEMA_TABLES = [
 
 // Supporting tables outside the ERD: authentication sessions and one-time
 // account tokens (workspace invitations + password resets).
-export const SUPPORT_TABLES = ["sessions", "account_tokens"] as const;
+export const SUPPORT_TABLES = ["sessions", "account_tokens", "google_identities", "google_login_challenges"] as const;
 
 const ENUM_STATEMENTS = [
   `DO $$ BEGIN
@@ -303,6 +303,25 @@ const AUTH_AND_PREFERENCE_STATEMENTS = [
     revoked_at timestamptz NULL
   );`,
   `CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id);`,
+  `CREATE TABLE IF NOT EXISTS google_identities (
+    google_sub text PRIMARY KEY,
+    user_id uuid NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now()
+  );`,
+  `CREATE TABLE IF NOT EXISTS google_login_challenges (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    challenge_hash text NOT NULL UNIQUE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    google_sub text NOT NULL,
+    email text NOT NULL,
+    otp_hash text NOT NULL,
+    attempts smallint NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 5),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    delivered_at timestamptz NULL,
+    consumed_at timestamptz NULL
+  );`,
+  `CREATE INDEX IF NOT EXISTS idx_google_login_user_created ON google_login_challenges (user_id, created_at DESC);`,
   `CREATE INDEX IF NOT EXISTS idx_account_tokens_workspace ON account_tokens (workspace_id, purpose);`,
   `CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications (user_id, created_at DESC);`,
   // Early seeds stored theme token names; labels now always hold hex colors.

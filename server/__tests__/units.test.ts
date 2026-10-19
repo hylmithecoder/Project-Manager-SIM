@@ -50,7 +50,7 @@ describe("WebSocket URL + dev proxy contract", () => {
 describe("Action registry", () => {
   test("only login/recovery actions are public", () => {
     expect([...PUBLIC_ACTIONS].sort()).toEqual(
-      ["auth:login", "auth:resume", "invite:accept", "invite:lookup", "password:reset", "password:reset_request"].sort(),
+      ["auth:login", "auth:resume", "auth:google_config", "auth:google_start", "auth:google_verify", "invite:accept", "invite:lookup", "password:reset", "password:reset_request"].sort(),
     );
     expect(typeof ACTION_HANDLERS["dev:create_workspace"]).toBe("function");
     expect(typeof ACTION_HANDLERS["card:toggle_assignee"]).toBe("function");

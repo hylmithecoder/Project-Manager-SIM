@@ -77,6 +77,7 @@ export function useWorkspaceSocket() {
       const result = await rawRequest<T>(action, payload);
       if (
         action === "auth:login" ||
+        action === "auth:google_verify" ||
         action === "invite:accept" ||
         action === "password:reset"
       ) {

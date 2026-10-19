@@ -19,6 +19,7 @@ import type {
   WsResponseMessage,
 } from "./ws/protocol";
 import { buildSnapshot } from "./ws/snapshot";
+import type { GoogleTokenVerifier } from "./auth/google";
 
 export interface WsClientData {
   clientId: string;
@@ -157,6 +158,8 @@ export async function startServer(options?: {
   staticDir?: string;
   /** Interval for the due-soon reminder scan; 0 disables it. */
   dueSoonIntervalMs?: number;
+  /** Test-only dependency injection; production always uses Google's verifier. */
+  googleTokenVerifier?: GoogleTokenVerifier;
 }): Promise<BunServer<WsClientData>> {
   const hostname = options?.hostname ?? process.env.APP_SERVER_HOST ?? "0.0.0.0";
   const port = options?.port ?? Number(process.env.APP_SERVER_PORT || 5790);
@@ -321,6 +324,7 @@ export async function startServer(options?: {
       activeWorkspaceId: req.headers.get("x-workspace-id") || null,
       origin: resolvePublicOrigin(req, allowedOrigins),
       onlineUserIds: onlineUserIds(),
+      googleTokenVerifier: options?.googleTokenVerifier,
     };
     try {
       const { result: res, notifications } = await collectBrowserNotifications(() => handleWsAction(ctx, action, payload));
@@ -470,6 +474,7 @@ export async function startServer(options?: {
           activeWorkspaceId: ws.data.workspaceId,
           origin: ws.data.origin,
           onlineUserIds: onlineUserIds(),
+          googleTokenVerifier: options?.googleTokenVerifier,
         };
 
         try {

@@ -1,6 +1,7 @@
 import type { BunSqlClient } from "../bun-env";
 import type { AuthUserRow } from "../auth/auth";
 import type { WorkspaceRole } from "./protocol";
+import type { GoogleTokenVerifier } from "../auth/google";
 
 /** Per-request context; `user` is bound to the socket after login/resume. */
 export interface ActionContext {
@@ -11,6 +12,8 @@ export interface ActionContext {
   /** Public base URL used in email links, derived from the browser Origin. */
   origin: string;
   onlineUserIds: ReadonlySet<string>;
+  /** Optional dependency supplied by isolated integration tests, never by API payloads. */
+  googleTokenVerifier?: GoogleTokenVerifier;
 }
 
 export interface ActionResult {

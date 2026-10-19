@@ -1,6 +1,9 @@
 export type WsAction =
   // --- Auth & account (some allowed before login) ---
   | "auth:login"
+  | "auth:google_config"
+  | "auth:google_start"
+  | "auth:google_verify"
   | "auth:resume"
   | "auth:logout"
   | "invite:lookup"
@@ -71,6 +74,14 @@ export type WsAction =
   | "smtp:test_send";
 
 export type PlatformRole = "developer" | "user";
+
+export interface GoogleLoginConfigDto { enabled: boolean; client_id: string | null }
+export interface GoogleLoginChallengeDto {
+  challenge: string;
+  email: string;
+  expires_at: string;
+  resend_after_seconds: number;
+}
 export type WorkspaceRole = "owner" | "admin" | "member" | "guest";
 
 export interface WsRequestMessage<T = Record<string, unknown>> {

@@ -28,6 +28,23 @@ const MANAGER = "owner, admin";
  */
 export const ACTION_DOCS: Record<WsAction, ActionDoc> = {
   // ---------------------------------------------------------------- Auth
+  "auth:google_config": {
+    tag: "Auth", public: true, summary: "Konfigurasi publik login Google",
+    response: s.obj({ enabled: s.bool(), client_id: s.nullable(s.str()) }),
+  },
+  "auth:google_start": {
+    tag: "Auth", public: true, summary: "Verifikasi akun Google dan kirim OTP email",
+    description: "Kirim credential ID token dari Google Identity Services. Hanya akun terdaftar dan aktif. Belum membuat sesi. OTP 6 digit, 5 menit; jeda kirim 60 detik, maksimum 5 permintaan per 15 menit. Permintaan baru membatalkan kode sebelumnya. Untuk kirim ulang panggil lagi dengan credential Google yang masih valid.",
+    body: s.obj({ credential: s.str("Signed Google ID token; tidak disimpan") }, ["credential"]),
+    response: s.obj({ challenge: s.str("Rahasia tantangan; simpan sementara di memori"), email: s.email(), expires_at: s.str(), resend_after_seconds: s.int() }),
+    emails: "OTP login → alamat email terverifikasi yang cocok dengan akun terdaftar",
+  },
+  "auth:google_verify": {
+    tag: "Auth", public: true, summary: "Selesaikan login Google dengan OTP",
+    description: "Session token hanya diterbitkan setelah OTP benar. Maksimum 5 percobaan, sekali pakai, tahan verifikasi paralel. Pada WebSocket langsung menerima snapshot dan sesi seperti auth:login.",
+    body: s.obj({ challenge: s.str(), code: s.str("OTP 6 digit") }, ["challenge", "code"]),
+    response: s.ref("AuthResult"),
+  },
   "auth:login": {
     tag: "Auth",
     public: true,
